@@ -23,6 +23,7 @@ The MIT License (MIT)
 */
 
 #include "ksvd.h"
+#include "Eigen/SVD"
 #include <cmath>
 
 
@@ -59,13 +60,67 @@ void Solver::KSVDStep( int kth )
 {
 	// Finw wk as the group of indices pointing to samples {yi} that use the atom dk
 	ARRAY_T(int) wk;
-	for( int sample_idx = 0; sample_idx < sample_count; sample_idx++)
+	for( int sample_idx = 0; sample_idx < sample_count; sample_idx++ )
 	{
 		if( X(kth, sample_idx) != 0 )
 		{
 			PUSH_ARRAY_T( wk, sample_idx );
 		}
 	}
+
+	int ksample_count = SIZE_ARRAY_T(wk);
+
+	// Compute Yr, which is the reduced Y that includes only the subset of samples that are currently using the atom dk
+	Matrix_t Yr( dimensionality, ksample_count );
+	for( int sample_idx = 0; sample_idx < ksample_count; sample_idx++ )
+	{
+		Yr.col( sample_idx ) = Y.col( wk[sample_idx] );
+	}
+
+	// Compute Xr, which is the reduced X that includes only the subset of samples that are currently using the atom dk
+	Matrix_t Xr( dictionary_size, ksample_count );
+	for( int sample_idx = 0; sample_idx < ksample_count; sample_idx++ )
+	{
+		Xr.col( sample_idx ) = X.col( wk[sample_idx] );
+	}
+
+	// Extract xrk
+	Vector_t xrk( Xr.row( kth ) );
+
+	// Replace xrk in Xr by zeros so as to compute Erk
+	for( int sample_idx = 0; sample_idx < sample_count; sample_idx++ )
+	{
+		Xr( kth, sample_idx ) = 0;
+	}
+	
+	Matrix_t Er( Yr );
+	Er -= Dict*Xr;
+
+	// Now compute SVD of Er
+	Eigen::JacobiSVD<Matrix_t> svd(Er, Eigen::ComputeThinU | Eigen::ComputeThinV);
+
+	// New dk is first column of U
+	Vector_t dk_new = svd.matrixU().col( 0 );
+	Scalar_t sing_value = svd.singularValues()( 0, 0 );
+	Vector_t xrk_new = svd.matrixV().col( 0 );
+	xrk_new *= sing_value;
+
+	//Eigen::Matrix<Scalar_t, dimensionality, ksample_count, Eigen::ColMajor> Yr;
+	
+	//Matrix_t Omega( sample_count, ksample_count );
+	//Matrix_t Xr = X * Omega;
+	//Matrix_t Yr = Y * Omega;
+	
+
+	// Compute reduce matrix Dk with column Dk set to 0
+	//Matrix_t Dk( Dict );
+	//for( int dim_idx = 0; dim_idx < dimensionality; dim_idx++ )
+	//{
+	//	Dk( dim_idx, kth ) = 0;
+	//}
+
+	//Matrix_t Ek = Y - Dk * X;
+	//Matrix_t Er = Ek * Omega;
 }
 
 void TestSolver()

@@ -32,6 +32,7 @@ The MIT License (MIT)
 	#include <vector>
 	#define ARRAY_T(T)				std::vector<T>
 	#define PUSH_ARRAY_T(a, val)	(a).push_back(val)
+	#define SIZE_ARRAY_T(a)			(a).size()
 #endif
 
 /**/
