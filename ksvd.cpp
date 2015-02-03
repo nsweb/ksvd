@@ -88,7 +88,7 @@ void Solver::KSVDStep( int kth )
 	Vector_t xrk( Xr.row( kth ) );
 
 	// Replace xrk in Xr by zeros so as to compute Erk
-	for( int sample_idx = 0; sample_idx < sample_count; sample_idx++ )
+	for( int sample_idx = 0; sample_idx < ksample_count; sample_idx++ )
 	{
 		Xr( kth, sample_idx ) = 0;
 	}
@@ -132,13 +132,13 @@ void TestSolver()
 	//Matrix_t Y( solver.dimensionality, solver.sample_count );
 	for( int group_idx = 0; group_idx < 4 ; group_idx++ )
 	{
-		Scalar_t group_x = (Scalar_t)-0.5 + (float)(group_idx % 2);
-		Scalar_t group_y = (Scalar_t)-0.5 + (float)(group_idx / 2);
+		Scalar_t group_x = (Scalar_t)-0.5 + (Scalar_t)(group_idx % 2);
+		Scalar_t group_y = (Scalar_t)-0.5 + (Scalar_t)(group_idx / 2);
 
 		for( int sub_group_idx = 0; sub_group_idx < 4 ; sub_group_idx++ )
 		{
-			Scalar_t sub_group_x = group_x - (Scalar_t)0.1 + (Scalar_t)(sub_group_idx % 2);
-			Scalar_t sub_group_y = group_y - (Scalar_t)0.1 + (Scalar_t)(sub_group_idx / 2);
+			Scalar_t sub_group_x = group_x - (Scalar_t)0.1 + (Scalar_t)0.2*(sub_group_idx % 2);
+			Scalar_t sub_group_y = group_y - (Scalar_t)0.1 + (Scalar_t)0.2*(sub_group_idx / 2);
 
 			int sample_idx = 4*group_idx + sub_group_idx;
 			solver.Y(0, sample_idx) = sub_group_x;
@@ -157,6 +157,13 @@ void TestSolver()
 	solver.Dict(1, 2) = Sqrt2;
 	solver.Dict(0, 3) = Sqrt2;
 	solver.Dict(1, 3) = Sqrt2;
+
+	// Init X
+	for( int sample_idx = 0; sample_idx < 16; sample_idx++ )
+	{
+		for( int i=0; i<4; i++ )
+			solver.X( i, sample_idx ) = (Scalar_t)((i == (sample_idx / 4)) ? 1 : 0);
+	}
 
 	// Encoded signal
 	//Matrix_t X( solver.dictionary_size, solver.sample_count );
