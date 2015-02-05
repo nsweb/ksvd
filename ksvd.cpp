@@ -25,6 +25,7 @@ The MIT License (MIT)
 #include "ksvd.h"
 #include "Eigen/SVD"
 #include <cmath>
+#include <iostream>
 
 
 
@@ -105,6 +106,16 @@ void Solver::KSVDStep( int kth )
 	Vector_t xrk_new = svd.matrixV().col( 0 );
 	xrk_new *= sing_value;
 
+	Dict.col( kth ) = dk_new;
+	std::cout << "Here is the matrix Dict:" << std::endl << Dict << std::endl;
+
+	// Update X from xrk
+	for( int sample_idx = 0; sample_idx < ksample_count; sample_idx++ )
+	{
+		X( kth, wk[sample_idx] ) = xrk_new[sample_idx];
+	}
+	std::cout << "Here is the matrix X:" << std::endl << X << std::endl;
+
 	//Eigen::Matrix<Scalar_t, dimensionality, ksample_count, Eigen::ColMajor> Yr;
 	
 	//Matrix_t Omega( sample_count, ksample_count );
@@ -145,6 +156,7 @@ void TestSolver()
 			solver.Y(1, sample_idx) = sub_group_y;
 		}
 	}
+	std::cout << "Here is the matrix Y:" << std::endl << solver.Y << std::endl;
 
 	// Initial dictionnary
 	const Scalar_t Sqrt2 = (Scalar_t)sqrt( 2.0 );
@@ -157,6 +169,7 @@ void TestSolver()
 	solver.Dict(1, 2) = Sqrt2;
 	solver.Dict(0, 3) = Sqrt2;
 	solver.Dict(1, 3) = Sqrt2;
+	std::cout << "Here is the matrix Dict:" << std::endl << solver.Dict << std::endl;
 
 	// Init X
 	for( int sample_idx = 0; sample_idx < 16; sample_idx++ )
@@ -165,13 +178,18 @@ void TestSolver()
 			solver.X( i, sample_idx ) = (Scalar_t)((i == (sample_idx / 4)) ? 1 : 0);
 	}
 
+	std::cout << "Here is the matrix X:" << std::endl << solver.X << std::endl;
+
 	// Encoded signal
 	//Matrix_t X( solver.dictionary_size, solver.sample_count );
 
 	for( int kth = 0; kth < solver.dictionary_size ; kth++ )
 	{
+		std::cout << "ksvd step: " << kth << std::endl;
 		solver.KSVDStep( kth );
 	}
+
+	std::cout << "Here is the matrix Dict*X:" << std::endl << solver.Dict*solver.X << std::endl;
 }
 
 

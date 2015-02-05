@@ -7,8 +7,8 @@ function SetTarget( _configuration, _platform )
 		platformname = "win32"
 		archname = "x86"
 	end
-	local strtarget = string.format( "./bin/%s_%s/", _configuration, platformname ) 
-	local strobj = string.format( "./intermediate/%s_%s", _configuration, platformname ) 
+	local strtarget = string.format( "./bin/%s_%s/", platformname , _configuration) 
+	local strobj = string.format( "./intermediate/%s_%s", platformname , _configuration) 
 	configuration {_configuration, _platform}
 		targetdir( strtarget )
 		objdir( strobj )
