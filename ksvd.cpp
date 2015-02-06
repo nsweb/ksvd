@@ -159,7 +159,7 @@ void TestSolver()
 	std::cout << "Here is the matrix Y:" << std::endl << solver.Y << std::endl;
 
 	// Initial dictionnary
-	const Scalar_t Sqrt2 = (Scalar_t)sqrt( 2.0 );
+	const Scalar_t Sqrt2 = (Scalar_t)(sqrt( 2.0 ) * 0.5);
 	//Matrix_t Dict( solver.dimensionality, solver.dictionary_size );
 	solver.Dict(0, 0) = -Sqrt2;
 	solver.Dict(1, 0) = -Sqrt2;
