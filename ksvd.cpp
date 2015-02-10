@@ -69,7 +69,7 @@ void Solver::KSVDStep( int kth )
 		}
 	}
 
-	int ksample_count = SIZE_ARRAY_T(wk);
+	int ksample_count = (int)SIZE_ARRAY_T(wk);
 
 	// Compute Yr, which is the reduced Y that includes only the subset of samples that are currently using the atom dk
 	Matrix_t Yr( dimensionality, ksample_count );
@@ -134,6 +134,66 @@ void Solver::KSVDStep( int kth )
 	//Matrix_t Er = Ek * Omega;
 }
 
+void Solver::OMPStep()
+{
+	for( int sample_idx = 0; sample_idx < sample_count; sample_idx++ )
+	{
+		Vector_t ysample = Y.col( sample_idx );
+		Vector_t r = ysample;							// residual
+		ARRAY_T(int) I_atoms;							// (out) list of selected atoms for given sample
+		Matrix_t L( 1, 1 );	// Matrix from Cholesky decomposition, incrementally augmented
+		L(0, 0) = (Scalar_t)1.;
+		int I_atom_count = 0;
+
+		for( int k = 0; k < target_sparcity ; k++ )
+		{
+			// Project residual on all dictionary atoms, find the one that match best
+			int max_idx = -1;
+			Scalar_t max_value = (Scalar_t)-1.;
+			for( int atom_idx = 0; atom_idx < dictionary_size; atom_idx++ )
+			{
+				Scalar_t dot_val = abs( Dict.col( atom_idx ).dot( ysample ) );
+				if( dot_val > max_value )
+				{
+					// Ensure atom was not already selected previously
+					int I_idx = 0;
+					for( ; I_idx < SIZE_ARRAY_T(I_atoms); I_idx++ )
+					{
+						if( atom_idx == I_atoms[I_idx] )
+							break;
+					}
+
+					if( I_idx >= SIZE_ARRAY_T(I_atoms) )
+					{
+						max_value = dot_val;
+						max_idx = atom_idx;
+					}
+				}
+			}
+			if( max_idx != -1 )
+			{
+				PUSH_ARRAY_T( I_atoms, max_idx );
+				I_atom_count++;
+
+				// Fill partial dictionary matrix with only selected atoms
+				Matrix_t DictI_T( I_atom_count, dimensionality );
+				for( int atom_idx = 0; atom_idx < I_atom_count; atom_idx++ )
+				{
+					DictI_T.row( atom_idx ) = Dict.col( I_atoms[atom_idx] );
+				}
+
+				// w = solve for w { L.w = DictIT.dk }
+				Scalar_t w = 0;
+				if( I_atom_count == 1 )
+				{
+					w = DictI_T * 
+				}
+			}
+		}
+		
+	}
+}
+
 void TestSolver()
 {
 	Solver solver;
@@ -188,6 +248,8 @@ void TestSolver()
 		std::cout << "ksvd step: " << kth << std::endl;
 		solver.KSVDStep( kth );
 	}
+
+	solver.OMPStep();
 
 	std::cout << "Here is the matrix Dict*X:" << std::endl << solver.Dict*solver.X << std::endl;
 }
