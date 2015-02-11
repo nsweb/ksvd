@@ -141,9 +141,11 @@ void Solver::OMPStep()
 		Vector_t ysample = Y.col( sample_idx );
 		Vector_t r = ysample;							// residual
 		ARRAY_T(int) I_atoms;							// (out) list of selected atoms for given sample
-		Matrix_t L( 1, 1 );	// Matrix from Cholesky decomposition, incrementally augmented
+		Matrix_t L( 1, 1 );								// Matrix from Cholesky decomposition, incrementally augmented
 		L(0, 0) = (Scalar_t)1.;
 		int I_atom_count = 0;
+
+		Matrix_t dk( dimensionality, 1 );
 
 		for( int k = 0; k < target_sparcity ; k++ )
 		{
@@ -182,12 +184,40 @@ void Solver::OMPStep()
 					DictI_T.row( atom_idx ) = Dict.col( I_atoms[atom_idx] );
 				}
 
+				dk.col( 0 ) = Dict.col( I_atoms[I_atom_count-1] );
+
 				// w = solve for w { L.w = DictIT.dk }
-				Scalar_t w = 0;
+				Matrix_t DITdk = DictI_T * dk;
+
+				std::cout << "Here is the matrix DITdk:" << DITdk << std::endl;
+
+				Matrix_t w;
 				if( I_atom_count == 1 )
 				{
-					w = DictI_T * 
+					w = DITdk;
 				}
+				else
+				{
+					w = L.triangularView<Eigen::Lower>().solve( DITdk );
+				}
+
+				//            | L       0		|
+				// Update L = | wT  sqrt(1-wTw)	|
+				//                               
+				L.conservativeResize( I_atom_count + 1, I_atom_count + 1 );
+				for (int i = 0; i < I_atom_count; i++)
+				{
+					L( I_atom_count, i ) = w( i, 0 );
+					L( i, I_atom_count ) = 0;
+				}
+				L( I_atom_count, I_atom_count ) = (Scalar_t) sqrt( (Scalar_t)1. - w.col(0).dot( w.col(0) ) );
+
+				std::cout << "Here is the matrix L:" << L << std::endl;
+
+				// xI = solve for c { L.LT.c = xI }
+				Eigen::LLT<Matrix_t> llt;
+				llt.matrixL
+
 			}
 		}
 		
