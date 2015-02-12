@@ -134,6 +134,106 @@ void Solver::KSVDStep( int kth )
 	//Matrix_t Er = Ek * Omega;
 }
 
+
+
+void Solver::BatchOMPStep()
+{
+	for( int sample_idx = 0; sample_idx < sample_count; sample_idx++ )
+	{
+		Vector_t ysample = Y.col( sample_idx );
+		Vector_t r = ysample;							// residual
+		ARRAY_T(int) I_atoms;							// (out) list of selected atoms for given sample
+		Matrix_t L( 1, 1 );								// Matrix from Cholesky decomposition, incrementally augmented
+		L(0, 0) = (Scalar_t)1.;
+		int I_atom_count = 0;
+		Matrix_t G(dictionary_size, dictionary_size);	// G = DTD (fat matrix!)
+		G = Dict.transpose() * Dict;
+
+		Matrix_t alpha_0 = Dict.transpose() * ysample;
+		Matrix_t alpha = alpha_0;
+
+		Matrix_t dk( dimensionality, 1 );
+
+		for( int k = 0; k < target_sparcity ; k++ )
+		{
+			// Project residual on all dictionary atoms, find the one that match best
+			int max_idx = -1;
+			Scalar_t max_value = (Scalar_t)-1.;
+			for( int atom_idx = 0; atom_idx < dictionary_size; atom_idx++ )
+			{
+				Scalar_t dot_val = abs( alpha( atom_idx, 0 ) ); 
+				if( dot_val > max_value )
+				{
+					// Ensure atom was not already selected previously
+					int I_idx = 0;
+					for( ; I_idx < SIZE_ARRAY_T(I_atoms); I_idx++ )
+					{
+						if( atom_idx == I_atoms[I_idx] )
+							break;
+					}
+
+					if( I_idx >= SIZE_ARRAY_T(I_atoms) )
+					{
+						max_value = dot_val;
+						max_idx = atom_idx;
+					}
+				}
+			}
+			if( max_idx != -1 )
+			{
+				PUSH_ARRAY_T( I_atoms, max_idx );
+				I_atom_count++;
+
+				// Fill partial dictionary matrix with only selected atoms
+				Matrix_t DictI_T( I_atom_count, dimensionality );
+				for( int atom_idx = 0; atom_idx < I_atom_count; atom_idx++ )
+				{
+					DictI_T.row( atom_idx ) = Dict.col( I_atoms[atom_idx] );
+				}
+
+				dk.col( 0 ) = Dict.col( I_atoms[I_atom_count-1] );
+
+				// w = solve for w { L.w = DictIT.dk }
+				Matrix_t DITdk = DictI_T * dk;
+
+				std::cout << "Here is the matrix DITdk:" << DITdk << std::endl;
+
+				Matrix_t w;
+				if( I_atom_count == 1 )
+				{
+					w = DITdk;
+				}
+				else
+				{
+					w = L.triangularView<Eigen::Lower>().solve( DITdk );
+				}
+
+				//            | L       0		|
+				// Update L = | wT  sqrt(1-wTw)	|
+				//                               
+				L.conservativeResize( I_atom_count + 1, I_atom_count + 1 );
+				L.row(I_atom_count).head(I_atom_count) = w.col(0).head(I_atom_count);
+				L.col(I_atom_count).setZero(); 
+
+				//for (int i = 0; i < I_atom_count; i++)
+				//{
+				//	L( I_atom_count, i ) = w( i, 0 );
+				//	L( i, I_atom_count ) = 0;
+				//}
+				L( I_atom_count, I_atom_count ) = (Scalar_t) sqrt( (Scalar_t)1. - w.col(0).dot( w.col(0) ) );
+
+				std::cout << "Here is the matrix L:" << L << std::endl;
+
+
+				// xI = solve for c { L.LT.c = xI }
+
+
+			}
+		}
+
+	}
+}
+
 void Solver::OMPStep()
 {
 	for( int sample_idx = 0; sample_idx < sample_count; sample_idx++ )
@@ -205,18 +305,21 @@ void Solver::OMPStep()
 				// Update L = | wT  sqrt(1-wTw)	|
 				//                               
 				L.conservativeResize( I_atom_count + 1, I_atom_count + 1 );
-				for (int i = 0; i < I_atom_count; i++)
-				{
-					L( I_atom_count, i ) = w( i, 0 );
-					L( i, I_atom_count ) = 0;
-				}
+				L.row(I_atom_count).head(I_atom_count) = w.col(0).head(I_atom_count);
+				L.col(I_atom_count).setZero(); 
+
+				//for (int i = 0; i < I_atom_count; i++)
+				//{
+				//	L( I_atom_count, i ) = w( i, 0 );
+				//	L( i, I_atom_count ) = 0;
+				//}
 				L( I_atom_count, I_atom_count ) = (Scalar_t) sqrt( (Scalar_t)1. - w.col(0).dot( w.col(0) ) );
 
 				std::cout << "Here is the matrix L:" << L << std::endl;
 
+
 				// xI = solve for c { L.LT.c = xI }
-				Eigen::LLT<Matrix_t> llt;
-				llt.matrixL
+
 
 			}
 		}

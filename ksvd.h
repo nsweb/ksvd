@@ -57,6 +57,7 @@ namespace ksvd
 		void Init( int _target_sparcity, int _dictionary_size, int _dimensionality, int _sample_count );
 		void KSVDStep( int kth );
 		void OMPStep();
+		void BatchOMPStep();
 
 		Matrix_t Dict, X, Y;
 		int target_sparcity;
