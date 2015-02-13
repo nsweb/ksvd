@@ -247,6 +247,8 @@ void Solver::BatchOMPStep()
 
 void Solver::OMPStep()
 {
+	const Scalar_t Epsilon = (Scalar_t)1e-4;
+
 	for( int sample_idx = 0; sample_idx < sample_count; sample_idx++ )
 	{
 		Vector_t ysample = Y.col( sample_idx );
@@ -258,6 +260,7 @@ void Solver::OMPStep()
 
 		Matrix_t dk( dimensionality, 1 );
 		Matrix_t DictI_T( 0, dimensionality );			// Incrementaly updated
+		Matrix_t xI;									// (out) -> encoded signal
 
 		for( int k = 0; k < target_sparcity ; k++ )
 		{
@@ -284,7 +287,7 @@ void Solver::OMPStep()
 					}
 				}
 			}
-			if( max_idx != -1 )
+			if( max_idx != -1 && max_value > Epsilon )
 			{
 				if( I_atom_count >= 1 )
 				{
@@ -330,15 +333,24 @@ void Solver::OMPStep()
 				// first solve LTc :
 				Matrix_t LTc = L.triangularView<Eigen::Lower>().solve( alpha_I );
 				// then solve xI :
-				Matrix_t xI = L.transpose().triangularView<Eigen::Upper>().solve( LTc );
+				xI = L.transpose().triangularView<Eigen::Upper>().solve( LTc );
 
 				// r = y - Dict_I * xI
 				r = ysample - DictI_T.transpose() * xI;
 
+				std::cout << "Here is the new xI:" << xI << std::endl;
 				std::cout << "Here is the new residual:" << r << std::endl;
 			}
 		}
-		
+
+		// Update this particular sample in X matrix
+		X.col( sample_idx ).setZero();
+		for( int atom_idx = 0; atom_idx < I_atom_count; atom_idx++ )
+		{
+			X( I_atoms[atom_idx], sample_idx ) = xI( atom_idx, 0 );
+		}
+		std::cout << "Here is the matrix X after updating sample " << sample_idx << std::endl << X << std::endl;
+
 	}
 }
 
@@ -400,6 +412,7 @@ void TestSolver()
 	solver.OMPStep();
 
 	std::cout << "Here is the matrix Dict*X:" << std::endl << solver.Dict*solver.X << std::endl;
+	std::cout << "Compare with matrix Y:" << std::endl << solver.Y << std::endl;
 }
 
 
