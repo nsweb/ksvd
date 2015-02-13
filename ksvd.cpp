@@ -415,5 +415,49 @@ void TestSolver()
 	std::cout << "Compare with matrix Y:" << std::endl << solver.Y << std::endl;
 }
 
+void SolveImg( Scalar_t* img_data, int with, int height, Scalar_t* out_data )
+{
+	int block_size = 16; // 4x4
+	int dictionary_size = with * height / block_size;	// dictionary atoms picked at random first
+	int sample_count = with * height;
+
+	Solver solver;
+	solver.Init( 4 /*target_sparcity*/, dictionary_size /*dictionary_size*/, block_size /*dimensionality*/, sample_count /*sample_count*/ );
+
+	// Fill Y matrix, which represents the original samples
+	for( int y = 0; y < height - 4; y++)
+	{
+		for( int x = 0; x < with - 4; x++)
+		{
+			for( int dimy = 0; dimy < 4; dimy++ )
+			{
+				for( int dimx = 0; dimx < 4; dimx++ )
+				{
+					Y( sample_idx ) = img_data[(y + dimy) * with + (x + dimx)]
+				}
+			}
+			
+		}
+	}
+
+	for( int group_idx = 0; group_idx < 4 ; group_idx++ )
+	{
+		Scalar_t group_x = (Scalar_t)-0.5 + (Scalar_t)(group_idx % 2);
+		Scalar_t group_y = (Scalar_t)-0.5 + (Scalar_t)(group_idx / 2);
+
+		for( int sub_group_idx = 0; sub_group_idx < 4 ; sub_group_idx++ )
+		{
+			Scalar_t sub_group_x = group_x - (Scalar_t)0.1 + (Scalar_t)0.2*(sub_group_idx % 2);
+			Scalar_t sub_group_y = group_y - (Scalar_t)0.1 + (Scalar_t)0.2*(sub_group_idx / 2);
+
+			int sample_idx = 4*group_idx + sub_group_idx;
+			solver.Y(0, sample_idx) = sub_group_x;
+			solver.Y(1, sample_idx) = sub_group_y;
+		}
+	}
+	std::cout << "Here is the matrix Y:" << std::endl << solver.Y << std::endl;
+
+}
+
 
 }; /*namespace ksvd*/
