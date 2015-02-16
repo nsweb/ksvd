@@ -107,14 +107,14 @@ void Solver::KSVDStep( int kth )
 	xrk_new *= sing_value;
 
 	Dict.col( kth ) = dk_new;
-	std::cout << "Here is the matrix Dict:" << std::endl << Dict << std::endl;
+	//std::cout << "Here is the matrix Dict:" << std::endl << Dict << std::endl;
 
 	// Update X from xrk
 	for( int sample_idx = 0; sample_idx < ksample_count; sample_idx++ )
 	{
 		X( kth, wk[sample_idx] ) = xrk_new[sample_idx];
 	}
-	std::cout << "Here is the matrix X:" << std::endl << X << std::endl;
+	//std::cout << "Here is the matrix X:" << std::endl << X << std::endl;
 
 	//Eigen::Matrix<Scalar_t, dimensionality, ksample_count, Eigen::ColMajor> Yr;
 	
@@ -252,6 +252,7 @@ void Solver::OMPStep()
 	for( int sample_idx = 0; sample_idx < sample_count; sample_idx++ )
 	{
 		Vector_t ysample = Y.col( sample_idx );
+		std::cout << "Here is the sample " << sample_idx << " :" << ysample << std::endl;
 		Vector_t r = ysample;							// residual
 		ARRAY_T(int) I_atoms;							// (out) list of selected atoms for given sample
 		Matrix_t L( 1, 1 );								// Matrix from Cholesky decomposition, incrementally augmented
@@ -269,6 +270,7 @@ void Solver::OMPStep()
 			Scalar_t max_value = (Scalar_t)-1.;
 			for( int atom_idx = 0; atom_idx < dictionary_size; atom_idx++ )
 			{
+				std::cout << "Here is the atom " << atom_idx << " :" << Dict.col( atom_idx ) << std::endl;
 				Scalar_t dot_val = abs( Dict.col( atom_idx ).dot( r ) );
 				if( dot_val > max_value )
 				{
@@ -419,30 +421,45 @@ void SolveImg( Scalar_t* img_data, int with, int height, Scalar_t* out_data )
 {
 	srand( 123 );
 
-	const int block_size = 16; // 4x4
-	int dictionary_size = (with * height / block_size) / 4;	// dictionary atoms picked at random first
-	int sample_count = (with - 4) * (height - 4);
+	const int block_dim = 4; // 4x4
+	const int block_size = block_dim * block_dim; // 4x4
+	int dictionary_size = (with * height / block_size) / block_size;	// dictionary atoms picked at random first
+	int sample_count = with * height / block_size; // (with - 4) * (height - 4);
 
 	Solver solver;
 	solver.Init( 4 /*target_sparcity*/, dictionary_size /*dictionary_size*/, block_size /*dimensionality*/, sample_count /*sample_count*/ );
 
 	// Fill Y matrix, which represents the original samples
 	int sample_idx = 0;
-	for( int y = 0; y < height - 4; y++)
+	for( int y = 0; y < height / block_dim; y++)
 	{
-		for( int x = 0; x < with - 4; x++, sample_idx++)
+		for( int x = 0; x < with / block_dim; x++, sample_idx++)
 		{
-			for( int dimy = 0; dimy < 4; dimy++ )
+			for( int dimy = 0; dimy < block_dim; dimy++ )
 			{
-				for( int dimx = 0; dimx < 4; dimx++ )
+				for( int dimx = 0; dimx < block_dim; dimx++ )
 				{
-					int dim_index = dimy * 4 + dimx;
-					solver.Y( dim_index, sample_idx ) = img_data[(y + dimy) * with + (x + dimx)];
+					int dim_index = dimy * block_dim + dimx;
+					solver.Y( dim_index, sample_idx ) = img_data[(block_dim*y + dimy) * with + (block_dim*x + dimx)];
 				}
 			}
 		}
 	}
-	//std::cout << "Here is the matrix Y:" << std::endl << solver.Y << std::endl;
+	//for( int y = 0; y < height - 4; y++)
+	//{
+	//	for( int x = 0; x < with - 4; x++, sample_idx++)
+	//	{
+	//		for( int dimy = 0; dimy < 4; dimy++ )
+	//		{
+	//			for( int dimx = 0; dimx < 4; dimx++ )
+	//			{
+	//				int dim_index = dimy * 4 + dimx;
+	//				solver.Y( dim_index, sample_idx ) = img_data[(y + dimy) * with + (x + dimx)];
+	//			}
+	//		}
+	//	}
+	//}
+	std::cout << "Here is the matrix Y:" << std::endl << solver.Y << std::endl;
 
 	// Initial dictionary
 	for( int dict_idx = 0; dict_idx < dictionary_size ; dict_idx++ )
