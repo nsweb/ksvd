@@ -301,7 +301,7 @@ void Solver::OMPStep()
 					dk.col( 0 ) = Dict.col( max_idx );
 
 					Matrix_t DITdk = DictI_T * dk;
-					std::cout << "Here is the matrix DITdk:" << DITdk << std::endl;
+					//std::cout << "Here is the matrix DITdk:" << DITdk << std::endl;
 
 					// w = solve for w { L.w = DictIT.dk }
 					Matrix_t w = L.triangularView<Eigen::Lower>().solve( DITdk );
@@ -317,7 +317,7 @@ void Solver::OMPStep()
 					L( I_atom_count, I_atom_count ) = val_tmp < 1 ? (val_tmp < 0 ? 0 : (Scalar_t) sqrt( val_tmp )) : 1;
 				}
 
-				std::cout << "Here is the matrix L:" << L << std::endl;
+				//std::cout << "Here is the matrix L:" << L << std::endl;
 
 				PUSH_ARRAY_T( I_atoms, max_idx );
 				I_atom_count++;
@@ -325,7 +325,7 @@ void Solver::OMPStep()
 				DictI_T.conservativeResize( I_atom_count, dimensionality );
 				DictI_T.row( I_atom_count - 1 ) = Dict.col( max_idx );
 
-				std::cout << "Here is the matrix DictI_T:" << DictI_T << std::endl;
+				//std::cout << "Here is the matrix DictI_T:" << DictI_T << std::endl;
 
 				Matrix_t alpha_I( I_atom_count, 1 );
 				alpha_I = DictI_T * ysample;
@@ -338,8 +338,8 @@ void Solver::OMPStep()
 				// r = y - Dict_I * xI
 				r = ysample - DictI_T.transpose() * xI;
 
-				std::cout << "Here is the new xI:" << xI << std::endl;
-				std::cout << "Here is the new residual:" << r << std::endl;
+				//std::cout << "Here is the new xI:" << xI << std::endl;
+				//std::cout << "Here is the new residual:" << r << std::endl;
 			}
 		}
 
@@ -349,7 +349,7 @@ void Solver::OMPStep()
 		{
 			X( I_atoms[atom_idx], sample_idx ) = xI( atom_idx, 0 );
 		}
-		std::cout << "Here is the matrix X after updating sample " << sample_idx << std::endl << X << std::endl;
+		//std::cout << "Here is the matrix X after updating sample " << sample_idx << std::endl << X << std::endl;
 
 	}
 }
@@ -417,46 +417,53 @@ void TestSolver()
 
 void SolveImg( Scalar_t* img_data, int with, int height, Scalar_t* out_data )
 {
-	int block_size = 16; // 4x4
-	int dictionary_size = with * height / block_size;	// dictionary atoms picked at random first
-	int sample_count = with * height;
+	srand( 123 );
+
+	const int block_size = 16; // 4x4
+	int dictionary_size = (with * height / block_size) / 4;	// dictionary atoms picked at random first
+	int sample_count = (with - 4) * (height - 4);
 
 	Solver solver;
 	solver.Init( 4 /*target_sparcity*/, dictionary_size /*dictionary_size*/, block_size /*dimensionality*/, sample_count /*sample_count*/ );
 
 	// Fill Y matrix, which represents the original samples
+	int sample_idx = 0;
 	for( int y = 0; y < height - 4; y++)
 	{
-		for( int x = 0; x < with - 4; x++)
+		for( int x = 0; x < with - 4; x++, sample_idx++)
 		{
 			for( int dimy = 0; dimy < 4; dimy++ )
 			{
 				for( int dimx = 0; dimx < 4; dimx++ )
 				{
-					Y( sample_idx ) = img_data[(y + dimy) * with + (x + dimx)]
+					int dim_index = dimy * 4 + dimx;
+					solver.Y( dim_index, sample_idx ) = img_data[(y + dimy) * with + (x + dimx)];
 				}
 			}
-			
 		}
 	}
+	//std::cout << "Here is the matrix Y:" << std::endl << solver.Y << std::endl;
 
-	for( int group_idx = 0; group_idx < 4 ; group_idx++ )
+	// Initial dictionary
+	for( int dict_idx = 0; dict_idx < dictionary_size ; dict_idx++ )
 	{
-		Scalar_t group_x = (Scalar_t)-0.5 + (Scalar_t)(group_idx % 2);
-		Scalar_t group_y = (Scalar_t)-0.5 + (Scalar_t)(group_idx / 2);
+		int rsample = rand() % sample_count;
+		solver.Dict.col( dict_idx ) = solver.Y.col( rsample );
+		solver.Dict.col( dict_idx ).normalize();
+	}
+	//std::cout << "Here is the matrix Dict:" << std::endl << solver.Dict << std::endl;
 
-		for( int sub_group_idx = 0; sub_group_idx < 4 ; sub_group_idx++ )
+	const int max_iter = 20;
+	for( int iter = 0; iter < max_iter ; iter++ )
+	{
+		solver.OMPStep();
+
+		for( int kth = 0; kth < solver.dictionary_size ; kth++ )
 		{
-			Scalar_t sub_group_x = group_x - (Scalar_t)0.1 + (Scalar_t)0.2*(sub_group_idx % 2);
-			Scalar_t sub_group_y = group_y - (Scalar_t)0.1 + (Scalar_t)0.2*(sub_group_idx / 2);
-
-			int sample_idx = 4*group_idx + sub_group_idx;
-			solver.Y(0, sample_idx) = sub_group_x;
-			solver.Y(1, sample_idx) = sub_group_y;
+			std::cout << "ksvd step: " << kth << std::endl;
+			solver.KSVDStep( kth );
 		}
 	}
-	std::cout << "Here is the matrix Y:" << std::endl << solver.Y << std::endl;
-
 }
 
 
