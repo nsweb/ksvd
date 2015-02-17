@@ -67,7 +67,7 @@ namespace ksvd
 	};
 
 	void TestSolver();
-	void SolveImg( Scalar_t* img_data, int with, int height, Scalar_t* out_data );
+	void SolveImg( Scalar_t* img_data, int with, int height, Scalar_t* out_data, Scalar_t* out_atoms, int* width_atoms, int* height_atoms );
 
 
 }; /*namespace ksvd*/

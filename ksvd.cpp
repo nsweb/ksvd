@@ -70,6 +70,8 @@ void Solver::KSVDStep( int kth )
 	}
 
 	int ksample_count = SIZE_ARRAY_T(wk);
+	if( ksample_count == 0 )
+		return;	// Unused atom
 
 	// Compute Yr, which is the reduced Y that includes only the subset of samples that are currently using the atom dk
 	Matrix_t Yr( dimensionality, ksample_count );
@@ -252,7 +254,7 @@ void Solver::OMPStep()
 	for( int sample_idx = 0; sample_idx < sample_count; sample_idx++ )
 	{
 		Vector_t ysample = Y.col( sample_idx );
-		std::cout << "Here is the sample " << sample_idx << " :" << ysample << std::endl;
+		//std::cout << "Here is the sample " << sample_idx << " :" << ysample << std::endl;
 		Vector_t r = ysample;							// residual
 		ARRAY_T(int) I_atoms;							// (out) list of selected atoms for given sample
 		Matrix_t L( 1, 1 );								// Matrix from Cholesky decomposition, incrementally augmented
@@ -270,7 +272,7 @@ void Solver::OMPStep()
 			Scalar_t max_value = (Scalar_t)-1.;
 			for( int atom_idx = 0; atom_idx < dictionary_size; atom_idx++ )
 			{
-				std::cout << "Here is the atom " << atom_idx << " :" << Dict.col( atom_idx ) << std::endl;
+				//std::cout << "Here is the atom " << atom_idx << " :" << Dict.col( atom_idx ) << std::endl;
 				Scalar_t dot_val = abs( Dict.col( atom_idx ).dot( r ) );
 				if( dot_val > max_value )
 				{
@@ -417,14 +419,14 @@ void TestSolver()
 	std::cout << "Compare with matrix Y:" << std::endl << solver.Y << std::endl;
 }
 
-void SolveImg( Scalar_t* img_data, int with, int height, Scalar_t* out_data )
+void SolveImg( Scalar_t* img_data, int width, int height, Scalar_t* out_data, Scalar_t* out_atoms, int* width_atoms, int* height_atoms )
 {
 	srand( 123 );
 
 	const int block_dim = 4; // 4x4
 	const int block_size = block_dim * block_dim; // 4x4
-	int dictionary_size = (with * height / block_size) / block_size;	// dictionary atoms picked at random first
-	int sample_count = with * height / block_size; // (with - 4) * (height - 4);
+	int dictionary_size = (width * height / block_size) / block_size / 4;	// dictionary atoms picked at random first
+	int sample_count = width * height / block_size; // (with - 4) * (height - 4);
 
 	Solver solver;
 	solver.Init( 4 /*target_sparcity*/, dictionary_size /*dictionary_size*/, block_size /*dimensionality*/, sample_count /*sample_count*/ );
@@ -433,14 +435,14 @@ void SolveImg( Scalar_t* img_data, int with, int height, Scalar_t* out_data )
 	int sample_idx = 0;
 	for( int y = 0; y < height / block_dim; y++)
 	{
-		for( int x = 0; x < with / block_dim; x++, sample_idx++)
+		for( int x = 0; x < width / block_dim; x++, sample_idx++)
 		{
 			for( int dimy = 0; dimy < block_dim; dimy++ )
 			{
 				for( int dimx = 0; dimx < block_dim; dimx++ )
 				{
 					int dim_index = dimy * block_dim + dimx;
-					solver.Y( dim_index, sample_idx ) = img_data[(block_dim*y + dimy) * with + (block_dim*x + dimx)];
+					solver.Y( dim_index, sample_idx ) = img_data[(block_dim*y + dimy) * width + (block_dim*x + dimx)];
 				}
 			}
 		}
@@ -459,7 +461,7 @@ void SolveImg( Scalar_t* img_data, int with, int height, Scalar_t* out_data )
 	//		}
 	//	}
 	//}
-	std::cout << "Here is the matrix Y:" << std::endl << solver.Y << std::endl;
+	//std::cout << "Here is the matrix Y:" << std::endl << solver.Y << std::endl;
 
 	// Initial dictionary
 	for( int dict_idx = 0; dict_idx < dictionary_size ; dict_idx++ )
@@ -470,15 +472,37 @@ void SolveImg( Scalar_t* img_data, int with, int height, Scalar_t* out_data )
 	}
 	//std::cout << "Here is the matrix Dict:" << std::endl << solver.Dict << std::endl;
 
+	// Sparse coding
 	const int max_iter = 20;
 	for( int iter = 0; iter < max_iter ; iter++ )
 	{
 		solver.OMPStep();
 
+		// Update dictionary
 		for( int kth = 0; kth < solver.dictionary_size ; kth++ )
 		{
 			std::cout << "ksvd step: " << kth << std::endl;
 			solver.KSVDStep( kth );
+		}
+	}
+
+	// Compute resulting matrix
+	Matrix_t Result = solver.Dict * solver.X;
+
+	int block_count_x = width / block_dim;
+	for( int y = 0; y < height; y++)
+	{
+		int block_y = y / block_dim;
+		int dimy = y % block_dim;
+		for( int x = 0; x < width; x++ )
+		{
+			int block_x = x / block_dim;
+			int dimx = x % block_dim;
+			int sample_idx = block_count_x * block_y + block_x;
+			int dim_index = block_dim * dimy + dimx;
+
+			Scalar_t value = Result( dim_index, sample_idx );
+			out_data[y*width + x] = (value < 0 ? 0 : (value > 1 ? 1 : value));
 		}
 	}
 }
