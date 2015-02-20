@@ -253,6 +253,9 @@ void Solver::OMPStep()
 
 	for( int sample_idx = 0; sample_idx < sample_count; sample_idx++ )
 	{
+		if( sample_idx % 1000 == 0 )
+			std::cout << "OMPStep processing sample " << sample_idx + 1 << " / " << sample_count << std::endl;
+
 		Vector_t ysample = Y.col( sample_idx );
 		//std::cout << "Here is the sample " << sample_idx << " :" << ysample << std::endl;
 		Vector_t r = ysample;							// residual
@@ -419,7 +422,7 @@ void TestSolver()
 	std::cout << "Compare with matrix Y:" << std::endl << solver.Y << std::endl;
 }
 
-void SolveImg( Scalar_t* img_data, int width, int height, Scalar_t* out_data, Scalar_t* out_atoms, int* width_atoms, int* height_atoms )
+void SolveImg( Scalar_t* img_data, int width, int height, Scalar_t* out_data/*, Scalar_t* out_atoms, int* width_atoms, int* height_atoms*/ )
 {
 	srand( 123 );
 
