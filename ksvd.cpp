@@ -36,7 +36,8 @@ Solver::Solver() :
 	target_sparcity(0),
 	dictionary_size(0),
 	dimensionality(0),
-	sample_count(0)
+	sample_count(0),
+	bVerbose(false)
 {
 		
 }
@@ -45,12 +46,13 @@ Solver::~Solver()
 
 }
 
-void Solver::Init( int _target_sparcity, int _dictionary_size, int _dimensionality, int _sample_count )
+void Solver::Init( int _target_sparcity, int _dictionary_size, int _dimensionality, int _sample_count, bool _bVerbose )
 {
 	target_sparcity = _target_sparcity;
 	dictionary_size = _dictionary_size;
 	dimensionality = _dimensionality;
 	sample_count = _sample_count;
+	bVerbose = _bVerbose;
 
 	Y.resize( _dimensionality, _sample_count );
 	Dict.resize( _dimensionality, _dictionary_size );
@@ -251,10 +253,12 @@ void Solver::OMPStep()
 {
 	const Scalar_t Epsilon = (Scalar_t)1e-4;
 
+	const int sample_inc = (sample_count + 99) / 100;
 	for( int sample_idx = 0; sample_idx < sample_count; sample_idx++ )
 	{
-		if( sample_idx % 1000 == 0 )
-			std::cout << "OMPStep processing sample " << sample_idx + 1 << " / " << sample_count << std::endl;
+		if( bVerbose && sample_idx % (sample_inc-1) == 0 )
+			//std::cout << "OMPStep processing sample " << sample_idx + 1 << " / " << sample_count << std::endl;
+			std::cout << "\rOMPStep processing sample " << (sample_idx + 1) * 100 / sample_count << " %" << std::flush;
 
 		Vector_t ysample = Y.col( sample_idx );
 		//std::cout << "Here is the sample " << sample_idx << " :" << ysample << std::endl;
@@ -361,6 +365,7 @@ void Solver::OMPStep()
 	}
 }
 
+#if 0
 void TestSolver()
 {
 	Solver solver;
@@ -428,8 +433,13 @@ void SolveImg( Scalar_t* img_data, int width, int height, Scalar_t* out_data/*, 
 
 	const int block_dim = 4; // 4x4
 	const int block_size = block_dim * block_dim; // 4x4
-	int dictionary_size = (width * height / block_size) / block_size / 4;	// dictionary atoms picked at random first
+	int dictionary_size = (width * height / block_size) / block_size / 2;	// dictionary atoms picked at random first
 	int sample_count = width * height / block_size; // (with - 4) * (height - 4);
+
+	const int InitSizeScalarBytes = width * height * sizeof(Scalar_t);
+	const int InitSizeBytes = width * height;
+	const int TargetSizeScalarBytes = dictionary_size * block_size * sizeof(Scalar_t) + sample_count * 2*sizeof(int);
+	const int TargetSizeBytes = dictionary_size * block_size + sample_count * 2*sizeof(int);
 
 	Solver solver;
 	solver.Init( 4 /*target_sparcity*/, dictionary_size /*dictionary_size*/, block_size /*dimensionality*/, sample_count /*sample_count*/ );
@@ -509,6 +519,6 @@ void SolveImg( Scalar_t* img_data, int width, int height, Scalar_t* out_data/*, 
 		}
 	}
 }
-
+#endif
 
 }; /*namespace ksvd*/

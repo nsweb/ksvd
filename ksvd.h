@@ -54,7 +54,7 @@ namespace ksvd
 		Solver();
 		~Solver();
 		
-		void Init( int _target_sparcity, int _dictionary_size, int _dimensionality, int _sample_count );
+		void Init( int _target_sparcity, int _dictionary_size, int _dimensionality, int _sample_count, bool _bVerbose );
 		void KSVDStep( int kth );
 		void OMPStep();
 		void BatchOMPStep();
@@ -64,6 +64,7 @@ namespace ksvd
 		int dictionary_size;
 		int dimensionality;
 		int sample_count;
+		bool bVerbose;
 	};
 
 	void TestSolver();
