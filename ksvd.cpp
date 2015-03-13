@@ -257,11 +257,9 @@ void Solver::OMPStep()
 	for( int sample_idx = 0; sample_idx < sample_count; sample_idx++ )
 	{
 		if( bVerbose && sample_idx % (sample_inc-1) == 0 )
-			//std::cout << "OMPStep processing sample " << sample_idx + 1 << " / " << sample_count << std::endl;
 			std::cout << "\rOMPStep processing sample " << (sample_idx + 1) * 100 / sample_count << " %" << std::flush;
 
 		Vector_t ysample = Y.col( sample_idx );
-		//std::cout << "Here is the sample " << sample_idx << " :" << ysample << std::endl;
 		Vector_t r = ysample;							// residual
 		ARRAY_T(int) I_atoms;							// (out) list of selected atoms for given sample
 		Matrix_t L( 1, 1 );								// Matrix from Cholesky decomposition, incrementally augmented
@@ -363,6 +361,9 @@ void Solver::OMPStep()
 		//std::cout << "Here is the matrix X after updating sample " << sample_idx << std::endl << X << std::endl;
 
 	}
+
+	if( bVerbose )
+		std::cout << "\rOMPStep processing sample 100 %" << std::endl;
 }
 
 #if 0
