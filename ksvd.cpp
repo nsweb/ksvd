@@ -145,6 +145,7 @@ void Solver::KSVDStep( int kth )
 
 void Solver::BatchOMPStep()
 {
+
 	const Scalar_t Epsilon = (Scalar_t)1e-4;
 
 	// Compute Graham matrix G = Dict_T.Dict
@@ -167,9 +168,11 @@ void Solver::BatchOMPStep()
 		Vector_t alphan = alpha0;
 		Vector_t alpha0_I;
 
-		Matrix_t dk( dimensionality, 1 );
-		Matrix_t DictI_T( 0, dimensionality );			// Incrementaly updated
-		Matrix_t xI;									// (out) -> encoded signal
+		Matrix_t G_I( 0, dictionary_size );			// Incrementaly updated
+
+		//Matrix_t dk( dimensionality, 1 );
+		//Matrix_t DictI_T( 0, dimensionality );			// Incrementaly updated
+		//Matrix_t xI;									// (out) -> encoded signal
 
 		for( int k = 0; k < target_sparcity ; k++ )
 		{
@@ -191,11 +194,13 @@ void Solver::BatchOMPStep()
 
 			// Build column vector GI_k
 			Matrix_t w( I_atom_count, 1 );
+
+#if 0			
 			for( int atom_idx = 0; atom_idx < I_atom_count; atom_idx++ )
 			{
 				w[atom_idx] = G( I_atoms[atom_idx], max_idx );
 			}
-
+#endif
 			if( I_atom_count >= 1 )
 			{
 //dk.col( 0 ) = Dict.col( max_idx );
@@ -231,24 +236,28 @@ void Solver::BatchOMPStep()
 			// then solve c :
 			Matrix_t cn = L.transpose().triangularView<Eigen::Upper>().solve( LTc );
 
-			TODO
+			G_I.conservativeResize( I_atom_count, dictionary_size );
+			G_I.col( I_atom_count - 1 ) = G.col( max_idx );
 			
+			Matrix_t betan = G_I * cn;
+			alphan = alpha0 - betan;
 
-			DictI_T.conservativeResize( I_atom_count, dimensionality );
-			DictI_T.row( I_atom_count - 1 ) = Dict.col( max_idx );
 
-			//std::cout << "Here is the matrix DictI_T:" << DictI_T << std::endl;
-
-			Matrix_t alpha_I( I_atom_count, 1 );
-			alpha_I = DictI_T * ysample;
-			// xI = solve for c { L.LT.c = alpha_I }
-			// first solve LTc :
-			Matrix_t LTc = L.triangularView<Eigen::Lower>().solve( alpha_I );
-			// then solve xI :
-			xI = L.transpose().triangularView<Eigen::Upper>().solve( LTc );
-
-			// r = y - Dict_I * xI
-			r = ysample - DictI_T.transpose() * xI;
+//DictI_T.conservativeResize( I_atom_count, dimensionality );
+//DictI_T.row( I_atom_count - 1 ) = Dict.col( max_idx );
+//
+////std::cout << "Here is the matrix DictI_T:" << DictI_T << std::endl;
+//
+//Matrix_t alpha_I( I_atom_count, 1 );
+//alpha_I = DictI_T * ysample;
+//// xI = solve for c { L.LT.c = alpha_I }
+//// first solve LTc :
+//Matrix_t LTc = L.triangularView<Eigen::Lower>().solve( alpha_I );
+//// then solve xI :
+//xI = L.transpose().triangularView<Eigen::Upper>().solve( LTc );
+//
+//// r = y - Dict_I * xI
+//r = ysample - DictI_T.transpose() * xI;
 
 			//std::cout << "Here is the new xI:" << xI << std::endl;
 			//std::cout << "Here is the new residual:" << r << std::endl;
@@ -258,7 +267,7 @@ void Solver::BatchOMPStep()
 		X.col( sample_idx ).setZero();
 		for( int atom_idx = 0; atom_idx < I_atom_count; atom_idx++ )
 		{
-			X( I_atoms[atom_idx], sample_idx ) = xI( atom_idx, 0 );
+			X( I_atoms[atom_idx], sample_idx ) = alphan( atom_idx, 0 );
 		}
 		//std::cout << "Here is the matrix X after updating sample " << sample_idx << std::endl << X << std::endl;
 
@@ -266,6 +275,7 @@ void Solver::BatchOMPStep()
 
 	if( bVerbose )
 		std::cout << "\rOMPStep processing sample 100 %" << std::endl;
+
 }
 
 void Solver::OMPStep()
