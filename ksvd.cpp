@@ -59,6 +59,9 @@ void Solver::Init( int _target_sparcity, int _dictionary_size, int _dimensionali
 	X.resize( _dictionary_size, _sample_count );
 }
 
+/*
+ * ksvd step : train dictionary from kth sample 
+ */
 void Solver::KSVDStep( int kth )
 {
 	// Finw wk as the group of indices pointing to samples {yi} that use the atom dk
@@ -142,111 +145,127 @@ void Solver::KSVDStep( int kth )
 
 void Solver::BatchOMPStep()
 {
+	const Scalar_t Epsilon = (Scalar_t)1e-4;
+
+	// Compute Graham matrix G = Dict_T.Dict
+	Matrix_t Dict_T = Dict.transpose();
+	Matrix_t G = Dict_T * Dict;
+
+	const int sample_inc = (sample_count + 99) / 100;
 	for( int sample_idx = 0; sample_idx < sample_count; sample_idx++ )
 	{
+		if( bVerbose && sample_idx % (sample_inc-1) == 0 )
+			std::cout << "\rOMPStep processing sample " << (sample_idx + 1) * 100 / sample_count << " %" << std::flush;
+
 		Vector_t ysample = Y.col( sample_idx );
 		Vector_t r = ysample;							// residual
 		ARRAY_T(int) I_atoms;							// (out) list of selected atoms for given sample
 		Matrix_t L( 1, 1 );								// Matrix from Cholesky decomposition, incrementally augmented
 		L(0, 0) = (Scalar_t)1.;
 		int I_atom_count = 0;
-		Matrix_t G(dictionary_size, dictionary_size);	// G = DTD (fat matrix!)
-		G = Dict.transpose() * Dict;
+		Vector_t alpha0 = Dict_T * ysample;			// project sample on all atoms
+		Vector_t alphan = alpha0;
+		Vector_t alpha0_I;
 
-		Matrix_t alpha_0 = Dict.transpose() * ysample;
-		Matrix_t alpha = alpha_0;
+		Matrix_t dk( dimensionality, 1 );
+		Matrix_t DictI_T( 0, dimensionality );			// Incrementaly updated
+		Matrix_t xI;									// (out) -> encoded signal
 
-		//Matrix_t dk( dimensionality, 1 );
-
-		for( int iter = 0; iter < target_sparcity ; iter++ )
+		for( int k = 0; k < target_sparcity ; k++ )
 		{
-			// Project residual on all dictionary atoms, find the one that match best
+			// Select greatest component of alpha_n
 			int max_idx = -1;
 			Scalar_t max_value = (Scalar_t)-1.;
 			for( int atom_idx = 0; atom_idx < dictionary_size; atom_idx++ )
 			{
-				Scalar_t dot_val = abs( alpha( atom_idx, 0 ) ); 
+				//std::cout << "Here is the atom " << atom_idx << " :" << Dict.col( atom_idx ) << std::endl;
+				Scalar_t dot_val = abs( alphan[atom_idx] );
 				if( dot_val > max_value )
 				{
-					// Ensure atom was not already selected previously
-					int I_idx = 0;
-					for( ; I_idx < SIZE_ARRAY_T(I_atoms); I_idx++ )
-					{
-						if( atom_idx == I_atoms[I_idx] )
-							break;
-					}
-
-					if( I_idx >= SIZE_ARRAY_T(I_atoms) )
-					{
-						max_value = dot_val;
-						max_idx = atom_idx;
-					}
+					max_value = dot_val;
+					max_idx = atom_idx;
 				}
 			}
-			if( max_idx != -1 )
+			if( max_value < Epsilon /*&& max_idx != -1*/ )
+				break;
+
+			// Build column vector GI_k
+			Matrix_t w( I_atom_count, 1 );
+			for( int atom_idx = 0; atom_idx < I_atom_count; atom_idx++ )
 			{
-				PUSH_ARRAY_T( I_atoms, max_idx );
-				I_atom_count++;
-
-	// Fill partial dictionary matrix with only selected atoms
-	//Matrix_t DictI_T( I_atom_count, dimensionality );
-	//for( int atom_idx = 0; atom_idx < I_atom_count; atom_idx++ )
-	//{
-	//	DictI_T.row( atom_idx ) = Dict.col( I_atoms[atom_idx] );
-	//}
-
-	//dk.col( 0 ) = Dict.col( I_atoms[I_atom_count-1] );
-
-	//// w = solve for w { L.w = DictIT.dk }
-	//Matrix_t DITdk = DictI_T * dk;
-	//std::cout << "Here is the matrix DITdk:" << DITdk << std::endl;
-
-	//			Matrix_t w( ;
-
-
-
-	//			      Matrix<real_t, iteration, 1> w;
- // 
- //     for(size_t i = 0; i < iteration; ++i)
-	//w[i] = G(indices[i], k);
-
-
-
-				// Fill w with GI,max_idx
-
-				//if( I_atom_count == 1 )
-				//{
-				//	w = DITdk;
-				//}
-				//else
-				//{
-				//	w = L.triangularView<Eigen::Lower>().solve( DITdk );
-				//}
-
-				////            | L       0		|
-				//// Update L = | wT  sqrt(1-wTw)	|
-				////                               
-				//L.conservativeResize( I_atom_count + 1, I_atom_count + 1 );
-				//L.row(I_atom_count).head(I_atom_count) = w.col(0).head(I_atom_count);
-				//L.col(I_atom_count).setZero(); 
-
-				////for (int i = 0; i < I_atom_count; i++)
-				////{
-				////	L( I_atom_count, i ) = w( i, 0 );
-				////	L( i, I_atom_count ) = 0;
-				////}
-				//L( I_atom_count, I_atom_count ) = (Scalar_t) sqrt( (Scalar_t)1. - w.col(0).dot( w.col(0) ) );
-
-				//std::cout << "Here is the matrix L:" << L << std::endl;
-
-
-				// xI = solve for c { L.LT.c = xI }
-
-
+				w[atom_idx] = G( I_atoms[atom_idx], max_idx );
 			}
+
+			if( I_atom_count >= 1 )
+			{
+//dk.col( 0 ) = Dict.col( max_idx );
+//Matrix_t DITdk = DictI_T * dk;
+//std::cout << "Here is the matrix DITdk:" << DITdk << std::endl;
+// w = solve for w { L.w = DictIT.dk }
+
+				// w = solve for w { L.w = GI_k }
+				L.triangularView<Eigen::Lower>().solveInPlace( w );
+
+				//            | L       0		|
+				// Update L = | wT  sqrt(1-wTw)	|
+				//                               
+				L.conservativeResize( I_atom_count + 1, I_atom_count + 1 );
+				L.row(I_atom_count).head(I_atom_count) = w.col(0).head(I_atom_count);
+				L.col(I_atom_count).setZero(); 
+
+				Scalar_t val_tmp = 1 - w.col(0).dot( w.col(0) );
+				L( I_atom_count, I_atom_count ) = val_tmp < 1 ? (val_tmp < 0 ? 0 : (Scalar_t) sqrt( val_tmp )) : 1;
+			}
+
+			//std::cout << "Here is the matrix L:" << L << std::endl;
+
+			alpha0_I.conservativeResize( I_atom_count + 1 );
+			alpha0_I[I_atom_count] = alpha0[max_idx];
+
+			PUSH_ARRAY_T( I_atoms, max_idx );
+			I_atom_count++;
+
+			// cn = solve for c { L.LT.c = alpha0_I }
+			// first solve LTc :
+			Matrix_t LTc = L.triangularView<Eigen::Lower>().solve( alpha0_I );
+			// then solve c :
+			Matrix_t cn = L.transpose().triangularView<Eigen::Upper>().solve( LTc );
+
+			TODO
+			
+
+			DictI_T.conservativeResize( I_atom_count, dimensionality );
+			DictI_T.row( I_atom_count - 1 ) = Dict.col( max_idx );
+
+			//std::cout << "Here is the matrix DictI_T:" << DictI_T << std::endl;
+
+			Matrix_t alpha_I( I_atom_count, 1 );
+			alpha_I = DictI_T * ysample;
+			// xI = solve for c { L.LT.c = alpha_I }
+			// first solve LTc :
+			Matrix_t LTc = L.triangularView<Eigen::Lower>().solve( alpha_I );
+			// then solve xI :
+			xI = L.transpose().triangularView<Eigen::Upper>().solve( LTc );
+
+			// r = y - Dict_I * xI
+			r = ysample - DictI_T.transpose() * xI;
+
+			//std::cout << "Here is the new xI:" << xI << std::endl;
+			//std::cout << "Here is the new residual:" << r << std::endl;
 		}
 
+		// Update this particular sample in X matrix
+		X.col( sample_idx ).setZero();
+		for( int atom_idx = 0; atom_idx < I_atom_count; atom_idx++ )
+		{
+			X( I_atoms[atom_idx], sample_idx ) = xI( atom_idx, 0 );
+		}
+		//std::cout << "Here is the matrix X after updating sample " << sample_idx << std::endl << X << std::endl;
+
 	}
+
+	if( bVerbose )
+		std::cout << "\rOMPStep processing sample 100 %" << std::endl;
 }
 
 void Solver::OMPStep()
@@ -272,7 +291,7 @@ void Solver::OMPStep()
 
 		for( int k = 0; k < target_sparcity ; k++ )
 		{
-			// Project residual on all dictionary atoms, find the one that match best
+			// Project residual on all dictionary atoms (columns), find the one that match best
 			int max_idx = -1;
 			Scalar_t max_value = (Scalar_t)-1.;
 			for( int atom_idx = 0; atom_idx < dictionary_size; atom_idx++ )
@@ -281,75 +300,80 @@ void Solver::OMPStep()
 				Scalar_t dot_val = abs( Dict.col( atom_idx ).dot( r ) );
 				if( dot_val > max_value )
 				{
-					// Ensure atom was not already selected previously
-					int I_idx = 0;
-					for( ; I_idx < SIZE_ARRAY_T(I_atoms); I_idx++ )
-					{
-						if( atom_idx == I_atoms[I_idx] )
-							break;
-					}
+					//// Ensure atom was not already selected previously
+					//int I_idx = 0;
+					//for( ; I_idx < SIZE_ARRAY_T(I_atoms); I_idx++ )
+					//{
+					//	if( atom_idx == I_atoms[I_idx] )
+					//		break;
+					//}
 
-					if( I_idx >= SIZE_ARRAY_T(I_atoms) )
+					//if( I_idx >= SIZE_ARRAY_T(I_atoms) )
 					{
 						max_value = dot_val;
 						max_idx = atom_idx;
 					}
 				}
 			}
-			if( max_idx != -1 && max_value > Epsilon )
+			if( max_value < Epsilon /*&& max_idx != -1*/ )
+				break;
+			
+			// We need to solve xI = DictI+.ysample
+			// where pseudo inverse DictI+ = (DictI_T.DictI)^(-1).DictI_T
+			// so xI = (DictI_T.DictI)^(-1).alpha_I where alpha_I = DictI_T.ysample
+
+
+			if( I_atom_count >= 1 )
 			{
-				if( I_atom_count >= 1 )
-				{
-					// Fill partial dictionary matrix with only selected atoms
-					//Matrix_t DictI_T( I_atom_count, dimensionality );
-					//for( int atom_idx = 0; atom_idx < I_atom_count; atom_idx++ )
-					//{
-					//	DictI_T.row( atom_idx ) = Dict.col( I_atoms[atom_idx] );
-					//}
+				// Fill partial dictionary matrix with only selected atoms
+				//Matrix_t DictI_T( I_atom_count, dimensionality );
+				//for( int atom_idx = 0; atom_idx < I_atom_count; atom_idx++ )
+				//{
+				//	DictI_T.row( atom_idx ) = Dict.col( I_atoms[atom_idx] );
+				//}
 
-					dk.col( 0 ) = Dict.col( max_idx );
+				dk.col( 0 ) = Dict.col( max_idx );
 
-					Matrix_t DITdk = DictI_T * dk;
-					//std::cout << "Here is the matrix DITdk:" << DITdk << std::endl;
+				Matrix_t DITdk = DictI_T * dk;
+				//std::cout << "Here is the matrix DITdk:" << DITdk << std::endl;
 
-					// w = solve for w { L.w = DictIT.dk }
-					Matrix_t w = L.triangularView<Eigen::Lower>().solve( DITdk );
+				// w = solve for w { L.w = DictIT.dk }
+				Matrix_t w = L.triangularView<Eigen::Lower>().solve( DITdk );
 					
-					//            | L       0		|
-					// Update L = | wT  sqrt(1-wTw)	|
-					//                               
-					L.conservativeResize( I_atom_count + 1, I_atom_count + 1 );
-					L.row(I_atom_count).head(I_atom_count) = w.col(0).head(I_atom_count);
-					L.col(I_atom_count).setZero(); 
+				//            | L       0		|
+				// Update L = | wT  sqrt(1-wTw)	|
+				//                               
+				L.conservativeResize( I_atom_count + 1, I_atom_count + 1 );
+				L.row(I_atom_count).head(I_atom_count) = w.col(0).head(I_atom_count);
+				L.col(I_atom_count).setZero(); 
 
-					Scalar_t val_tmp = 1 - w.col(0).dot( w.col(0) );
-					L( I_atom_count, I_atom_count ) = val_tmp < 1 ? (val_tmp < 0 ? 0 : (Scalar_t) sqrt( val_tmp )) : 1;
-				}
-
-				//std::cout << "Here is the matrix L:" << L << std::endl;
-
-				PUSH_ARRAY_T( I_atoms, max_idx );
-				I_atom_count++;
-
-				DictI_T.conservativeResize( I_atom_count, dimensionality );
-				DictI_T.row( I_atom_count - 1 ) = Dict.col( max_idx );
-
-				//std::cout << "Here is the matrix DictI_T:" << DictI_T << std::endl;
-
-				Matrix_t alpha_I( I_atom_count, 1 );
-				alpha_I = DictI_T * ysample;
-				// xI = solve for c { L.LT.c = alpha_I }
-				// first solve LTc :
-				Matrix_t LTc = L.triangularView<Eigen::Lower>().solve( alpha_I );
-				// then solve xI :
-				xI = L.transpose().triangularView<Eigen::Upper>().solve( LTc );
-
-				// r = y - Dict_I * xI
-				r = ysample - DictI_T.transpose() * xI;
-
-				//std::cout << "Here is the new xI:" << xI << std::endl;
-				//std::cout << "Here is the new residual:" << r << std::endl;
+				Scalar_t val_tmp = 1 - w.col(0).dot( w.col(0) );
+				L( I_atom_count, I_atom_count ) = val_tmp < 1 ? (val_tmp < 0 ? 0 : (Scalar_t) sqrt( val_tmp )) : 1;
 			}
+
+			//std::cout << "Here is the matrix L:" << L << std::endl;
+
+			PUSH_ARRAY_T( I_atoms, max_idx );
+			I_atom_count++;
+
+			DictI_T.conservativeResize( I_atom_count, dimensionality );
+			DictI_T.row( I_atom_count - 1 ) = Dict.col( max_idx );
+
+			//std::cout << "Here is the matrix DictI_T:" << DictI_T << std::endl;
+
+			Matrix_t alpha_I( I_atom_count, 1 );
+			alpha_I = DictI_T * ysample;
+			// xI = solve for c { L.LT.c = alpha_I }
+			// first solve LTc :
+			Matrix_t LTc = L.triangularView<Eigen::Lower>().solve( alpha_I );
+			// then solve xI :
+			xI = L.transpose().triangularView<Eigen::Upper>().solve( LTc );
+
+			// r = y - Dict_I * xI
+			r = ysample - DictI_T.transpose() * xI;
+
+			//std::cout << "Here is the new xI:" << xI << std::endl;
+			//std::cout << "Here is the new residual:" << r << std::endl;
 		}
 
 		// Update this particular sample in X matrix

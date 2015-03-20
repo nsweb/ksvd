@@ -59,7 +59,13 @@ namespace ksvd
 		void OMPStep();
 		void BatchOMPStep();
 
-		Matrix_t Dict, X, Y;
+		/** The dictionary - nb of rows = dimensionality - nb of cols = number of atoms / dictionary size */
+		Matrix_t Dict;
+		/** The encoded samples - nb of rows = number of atoms / dictionary size - nb of cols = number of samples */
+		Matrix_t X;
+		/** The original samples - nb of rows = dimensionality - nb of cols = number of initial samples */
+		Matrix_t Y;
+
 		int target_sparcity;
 		int dictionary_size;
 		int dimensionality;
