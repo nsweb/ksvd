@@ -145,7 +145,6 @@ void Solver::KSVDStep( int kth )
 
 void Solver::BatchOMPStep()
 {
-
 	const Scalar_t Epsilon = (Scalar_t)1e-4;
 
 	// Compute Graham matrix G = Dict_T.Dict
@@ -167,8 +166,9 @@ void Solver::BatchOMPStep()
 		Vector_t alpha0 = Dict_T * ysample;			// project sample on all atoms
 		Vector_t alphan = alpha0;
 		Vector_t alpha0_I;
-
-		Matrix_t G_I( 0, dictionary_size );			// Incrementaly updated
+		Matrix_t GI_T( dictionary_size, 0 );			// Incrementaly updated
+		Matrix_t cn;
+		//Matrix_t LTc;
 
 		//Matrix_t dk( dimensionality, 1 );
 		//Matrix_t DictI_T( 0, dimensionality );			// Incrementaly updated
@@ -192,15 +192,6 @@ void Solver::BatchOMPStep()
 			if( max_value < Epsilon /*&& max_idx != -1*/ )
 				break;
 
-			// Build column vector GI_k
-			Matrix_t w( I_atom_count, 1 );
-
-#if 0			
-			for( int atom_idx = 0; atom_idx < I_atom_count; atom_idx++ )
-			{
-				w[atom_idx] = G( I_atoms[atom_idx], max_idx );
-			}
-#endif
 			if( I_atom_count >= 1 )
 			{
 //dk.col( 0 ) = Dict.col( max_idx );
@@ -208,56 +199,46 @@ void Solver::BatchOMPStep()
 //std::cout << "Here is the matrix DITdk:" << DITdk << std::endl;
 // w = solve for w { L.w = DictIT.dk }
 
+				// Build column vector GI_k (in place in wM)
+				Matrix_t wM( I_atom_count, 1 );		
+				for( int atom_idx = 0; atom_idx < I_atom_count; atom_idx++ )
+				{
+					wM(atom_idx, 0) = G( I_atoms[atom_idx], max_idx );
+				}
+
 				// w = solve for w { L.w = GI_k }
-				L.triangularView<Eigen::Lower>().solveInPlace( w );
+				L.triangularView<Eigen::Lower>().solveInPlace( wM );
 
 				//            | L       0		|
 				// Update L = | wT  sqrt(1-wTw)	|
 				//                               
 				L.conservativeResize( I_atom_count + 1, I_atom_count + 1 );
-				L.row(I_atom_count).head(I_atom_count) = w.col(0).head(I_atom_count);
+				L.row(I_atom_count).head(I_atom_count) = wM.col(0).head(I_atom_count);
 				L.col(I_atom_count).setZero(); 
 
-				Scalar_t val_tmp = 1 - w.col(0).dot( w.col(0) );
+				Scalar_t val_tmp = 1 - wM.col(0).dot( wM.col(0) );
 				L( I_atom_count, I_atom_count ) = val_tmp < 1 ? (val_tmp < 0 ? 0 : (Scalar_t) sqrt( val_tmp )) : 1;
 			}
 
 			//std::cout << "Here is the matrix L:" << L << std::endl;
 
-			alpha0_I.conservativeResize( I_atom_count + 1 );
-			alpha0_I[I_atom_count] = alpha0[max_idx];
-
 			PUSH_ARRAY_T( I_atoms, max_idx );
 			I_atom_count++;
+
+			alpha0_I.conservativeResize( I_atom_count );
+			alpha0_I[I_atom_count-1] = alpha0[max_idx];
+
+			GI_T.conservativeResize( dictionary_size, I_atom_count );
+			GI_T.col( I_atom_count - 1 ) = G.row( max_idx );
 
 			// cn = solve for c { L.LT.c = alpha0_I }
 			// first solve LTc :
 			Matrix_t LTc = L.triangularView<Eigen::Lower>().solve( alpha0_I );
 			// then solve c :
-			Matrix_t cn = L.transpose().triangularView<Eigen::Upper>().solve( LTc );
-
-			G_I.conservativeResize( I_atom_count, dictionary_size );
-			G_I.col( I_atom_count - 1 ) = G.col( max_idx );
+			cn = L.transpose().triangularView<Eigen::Upper>().solve( LTc );
 			
-			Matrix_t betan = G_I * cn;
-			alphan = alpha0 - betan;
-
-
-//DictI_T.conservativeResize( I_atom_count, dimensionality );
-//DictI_T.row( I_atom_count - 1 ) = Dict.col( max_idx );
-//
-////std::cout << "Here is the matrix DictI_T:" << DictI_T << std::endl;
-//
-//Matrix_t alpha_I( I_atom_count, 1 );
-//alpha_I = DictI_T * ysample;
-//// xI = solve for c { L.LT.c = alpha_I }
-//// first solve LTc :
-//Matrix_t LTc = L.triangularView<Eigen::Lower>().solve( alpha_I );
-//// then solve xI :
-//xI = L.transpose().triangularView<Eigen::Upper>().solve( LTc );
-//
-//// r = y - Dict_I * xI
-//r = ysample - DictI_T.transpose() * xI;
+			if( k < target_sparcity-1 )
+				alphan = alpha0 - (GI_T * cn);
 
 			//std::cout << "Here is the new xI:" << xI << std::endl;
 			//std::cout << "Here is the new residual:" << r << std::endl;
@@ -267,10 +248,9 @@ void Solver::BatchOMPStep()
 		X.col( sample_idx ).setZero();
 		for( int atom_idx = 0; atom_idx < I_atom_count; atom_idx++ )
 		{
-			X( I_atoms[atom_idx], sample_idx ) = alphan( atom_idx, 0 );
+			X( I_atoms[atom_idx], sample_idx ) = cn( atom_idx, 0 );
 		}
 		//std::cout << "Here is the matrix X after updating sample " << sample_idx << std::endl << X << std::endl;
-
 	}
 
 	if( bVerbose )
