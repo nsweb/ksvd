@@ -40,13 +40,14 @@ namespace ksvd
 {
 #if WITH_KSVD_DOUBLE
 	typedef double Scalar_t;
-	typedef Eigen::MatrixXd Matrix_t;
-	typedef Eigen::VectorXd Vector_t;
 #else
 	typedef float Scalar_t;
-	typedef Eigen::MatrixXf Matrix_t;
-	typedef Eigen::VectorXf Vector_t;
 #endif
+
+	typedef Eigen::Matrix<Scalar_t, Eigen::Dynamic, Eigen::Dynamic>						Matrix_t;
+	typedef Eigen::Matrix<Scalar_t, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>	MatrixRowMajor_t;
+	typedef Eigen::Matrix<Scalar_t, 1, Eigen::Dynamic >									RowVector_t;
+	typedef Eigen::Matrix<Scalar_t, Eigen::Dynamic, 1>									Vector_t;
 
 	class Solver
 	{

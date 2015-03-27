@@ -93,14 +93,11 @@ void Solver::KSVDStep( int kth )
 	}
 
 	// Extract xrk
-	Vector_t xrk( Xr.row( kth ) );
+	Vector_t xrk( Xr.row(kth) );
 
 	// Replace xrk in Xr by zeros so as to compute Erk
-	for( int sample_idx = 0; sample_idx < ksample_count; sample_idx++ )
-	{
-		Xr( kth, sample_idx ) = 0;
-	}
-	
+	Xr.row(kth).head(ksample_count).setZero();
+
 	Matrix_t Er( Yr );
 	Er -= Dict*Xr;
 
@@ -110,7 +107,7 @@ void Solver::KSVDStep( int kth )
 	// New dk is first column of U
 	Vector_t dk_new = svd.matrixU().col( 0 );
 	Scalar_t sing_value = svd.singularValues()( 0, 0 );
-	Vector_t xrk_new = svd.matrixV().col( 0 );
+	RowVector_t xrk_new = svd.matrixV().col( 0 );
 	xrk_new *= sing_value;
 
 	Dict.col( kth ) = dk_new;
@@ -122,23 +119,6 @@ void Solver::KSVDStep( int kth )
 		X( kth, wk[sample_idx] ) = xrk_new[sample_idx];
 	}
 	//std::cout << "Here is the matrix X:" << std::endl << X << std::endl;
-
-	//Eigen::Matrix<Scalar_t, dimensionality, ksample_count, Eigen::ColMajor> Yr;
-	
-	//Matrix_t Omega( sample_count, ksample_count );
-	//Matrix_t Xr = X * Omega;
-	//Matrix_t Yr = Y * Omega;
-	
-
-	// Compute reduce matrix Dk with column Dk set to 0
-	//Matrix_t Dk( Dict );
-	//for( int dim_idx = 0; dim_idx < dimensionality; dim_idx++ )
-	//{
-	//	Dk( dim_idx, kth ) = 0;
-	//}
-
-	//Matrix_t Ek = Y - Dk * X;
-	//Matrix_t Er = Ek * Omega;
 }
 
 
@@ -194,11 +174,6 @@ void Solver::BatchOMPStep()
 
 			if( I_atom_count >= 1 )
 			{
-//dk.col( 0 ) = Dict.col( max_idx );
-//Matrix_t DITdk = DictI_T * dk;
-//std::cout << "Here is the matrix DITdk:" << DITdk << std::endl;
-// w = solve for w { L.w = DictIT.dk }
-
 				// Build column vector GI_k (in place in wM)
 				Matrix_t wM( I_atom_count, 1 );		
 				for( int atom_idx = 0; atom_idx < I_atom_count; atom_idx++ )
@@ -290,19 +265,8 @@ void Solver::OMPStep()
 				Scalar_t dot_val = abs( Dict.col( atom_idx ).dot( r ) );
 				if( dot_val > max_value )
 				{
-					//// Ensure atom was not already selected previously
-					//int I_idx = 0;
-					//for( ; I_idx < SIZE_ARRAY_T(I_atoms); I_idx++ )
-					//{
-					//	if( atom_idx == I_atoms[I_idx] )
-					//		break;
-					//}
-
-					//if( I_idx >= SIZE_ARRAY_T(I_atoms) )
-					{
-						max_value = dot_val;
-						max_idx = atom_idx;
-					}
+					max_value = dot_val;
+					max_idx = atom_idx;
 				}
 			}
 			if( max_value < Epsilon /*&& max_idx != -1*/ )
@@ -311,7 +275,6 @@ void Solver::OMPStep()
 			// We need to solve xI = DictI+.ysample
 			// where pseudo inverse DictI+ = (DictI_T.DictI)^(-1).DictI_T
 			// so xI = (DictI_T.DictI)^(-1).alpha_I where alpha_I = DictI_T.ysample
-
 
 			if( I_atom_count >= 1 )
 			{
@@ -440,99 +403,6 @@ void TestSolver()
 
 	std::cout << "Here is the matrix Dict*X:" << std::endl << solver.Dict*solver.X << std::endl;
 	std::cout << "Compare with matrix Y:" << std::endl << solver.Y << std::endl;
-}
-
-void SolveImg( Scalar_t* img_data, int width, int height, Scalar_t* out_data/*, Scalar_t* out_atoms, int* width_atoms, int* height_atoms*/ )
-{
-	srand( 123 );
-
-	const int block_dim = 4; // 4x4
-	const int block_size = block_dim * block_dim; // 4x4
-	int dictionary_size = (width * height / block_size) / block_size / 2;	// dictionary atoms picked at random first
-	int sample_count = width * height / block_size; // (with - 4) * (height - 4);
-
-	const int InitSizeScalarBytes = width * height * sizeof(Scalar_t);
-	const int InitSizeBytes = width * height;
-	const int TargetSizeScalarBytes = dictionary_size * block_size * sizeof(Scalar_t) + sample_count * 2*sizeof(int);
-	const int TargetSizeBytes = dictionary_size * block_size + sample_count * 2*sizeof(int);
-
-	Solver solver;
-	solver.Init( 4 /*target_sparcity*/, dictionary_size /*dictionary_size*/, block_size /*dimensionality*/, sample_count /*sample_count*/ );
-
-	// Fill Y matrix, which represents the original samples
-	int sample_idx = 0;
-	for( int y = 0; y < height / block_dim; y++)
-	{
-		for( int x = 0; x < width / block_dim; x++, sample_idx++)
-		{
-			for( int dimy = 0; dimy < block_dim; dimy++ )
-			{
-				for( int dimx = 0; dimx < block_dim; dimx++ )
-				{
-					int dim_index = dimy * block_dim + dimx;
-					solver.Y( dim_index, sample_idx ) = img_data[(block_dim*y + dimy) * width + (block_dim*x + dimx)];
-				}
-			}
-		}
-	}
-	//for( int y = 0; y < height - 4; y++)
-	//{
-	//	for( int x = 0; x < with - 4; x++, sample_idx++)
-	//	{
-	//		for( int dimy = 0; dimy < 4; dimy++ )
-	//		{
-	//			for( int dimx = 0; dimx < 4; dimx++ )
-	//			{
-	//				int dim_index = dimy * 4 + dimx;
-	//				solver.Y( dim_index, sample_idx ) = img_data[(y + dimy) * with + (x + dimx)];
-	//			}
-	//		}
-	//	}
-	//}
-	//std::cout << "Here is the matrix Y:" << std::endl << solver.Y << std::endl;
-
-	// Initial dictionary
-	for( int dict_idx = 0; dict_idx < dictionary_size ; dict_idx++ )
-	{
-		int rsample = rand() % sample_count;
-		solver.Dict.col( dict_idx ) = solver.Y.col( rsample );
-		solver.Dict.col( dict_idx ).normalize();
-	}
-	//std::cout << "Here is the matrix Dict:" << std::endl << solver.Dict << std::endl;
-
-	// Sparse coding
-	const int max_iter = 20;
-	for( int iter = 0; iter < max_iter ; iter++ )
-	{
-		solver.OMPStep();
-
-		// Update dictionary
-		for( int kth = 0; kth < solver.dictionary_size ; kth++ )
-		{
-			std::cout << "ksvd step: " << kth << std::endl;
-			solver.KSVDStep( kth );
-		}
-	}
-
-	// Compute resulting matrix
-	Matrix_t Result = solver.Dict * solver.X;
-
-	int block_count_x = width / block_dim;
-	for( int y = 0; y < height; y++)
-	{
-		int block_y = y / block_dim;
-		int dimy = y % block_dim;
-		for( int x = 0; x < width; x++ )
-		{
-			int block_x = x / block_dim;
-			int dimx = x % block_dim;
-			int sample_idx = block_count_x * block_y + block_x;
-			int dim_index = block_dim * dimy + dimx;
-
-			Scalar_t value = Result( dim_index, sample_idx );
-			out_data[y*width + x] = (value < 0 ? 0 : (value > 1 ? 1 : value));
-		}
-	}
 }
 #endif
 
