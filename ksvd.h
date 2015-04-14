@@ -136,14 +136,14 @@ void Solver::Init_WithRandomDictionary( int _dimensionality, int _sample_count, 
 		}
 	}
 
-	/*const*/ int dictionary_size = (width * height / block_size) / block_size / 4;	// dictionary atoms picked at random first
+	/*const*/ int dictionary_size = _dictionary_size ? _dictionary_size : (sample_count) / (_dimensionality * 4);	// dictionary atoms picked at random first
 
 	// Random inputs
 	for( int dict_idx = 0; dict_idx < dictionary_size ; dict_idx++ )
 	{
 		int rsample = rand() % sample_count;
-		solver.Dict.col( dict_idx ) = solver.Y.col( rsample );
-		solver.Dict.col( dict_idx ).normalize();	// normalize entries
+		Dict.col( dict_idx ) = Y.col( rsample );
+		Dict.col( dict_idx ).normalize();	// normalize entries
 	}
 
 	Y.resize( _dimensionality, _sample_count );
@@ -157,7 +157,7 @@ void Solver::Init_WithRandomDictionary( int _dimensionality, int _sample_count, 
 void Solver::Init_WithClusteredDictionary( int _dimensionality, int _sample_count, Scalar_t const* _samples, int _target_sparcity, Scalar_t _max_cluster_error, int _max_dictionary_size )
 {
 	target_sparcity = _target_sparcity;
-	dictionary_size = _dictionary_size;
+	dictionary_size = _max_dictionary_size;
 	dimensionality = _dimensionality;
 	sample_count = _sample_count;
 
@@ -172,22 +172,23 @@ void Solver::Init_WithClusteredDictionary( int _dimensionality, int _sample_coun
 	}
 
 	// From "clustering before training large datasets - case study: k-svd" paper
-	//const float T_max_error = 0.95f;
+	const Scalar_t T_max_error = _max_cluster_error > (Scalar_t)0.0 ? _max_cluster_error : (Scalar_t)0.95;
 	//const int fast_speed = 2;
 	//const int set_size_max = 128;
 	//int set_size = 16;
 	int centroid_count = 1;
 	IntArray_t centroid_used;
-	centroid_used.push_back( 0 );
-	ksvd::Matrix_t centroids( block_size, 1 );
-	for( int dim_index = 0; dim_index < block_size; dim_index++ )
-		centroids( dim_index, 0 ) = solver.Y( dim_index, 0 );
+	centroid_used.conservativeResize( 1 );
+	centroid_used[0] = 0;
+	ksvd::Matrix_t centroids( _dimensionality, 1 );
+	for( int dim_index = 0; dim_index < _dimensionality; dim_index++ )
+		centroids( dim_index, 0 ) = Y( dim_index, 0 );
 	centroids.col( 0 ).normalize();
 
 	for( int sample_idx = 0; sample_idx < _sample_count; sample_idx++ )
 	{
-		ksvd::Vector_t sample( block_size );
-		sample.col( 0 ) = solver.Y.col( sample_idx );
+		ksvd::Vector_t sample( _dimensionality );
+		sample.col( 0 ) = Y.col( sample_idx );
 		sample.normalize();
 
 		ksvd::RowVector_t centroid_dist = sample.transpose() * centroids;
@@ -216,9 +217,11 @@ void Solver::Init_WithClusteredDictionary( int _dimensionality, int _sample_coun
 		else
 		{
 			// Add new centroid
-			centroids.conservativeResize( block_size, centroid_count + 1 );
+			centroids.conservativeResize( _dimensionality, centroid_count + 1 );
 			centroids.col( centroid_count ) = sample.col( 0 );
-			centroid_used.push_back( 1 );
+
+			centroid_used.conservativeResize( centroid_count + 1 );
+			centroid_used[centroid_count] = 1;
 			centroid_count++;
 		}
 	}
