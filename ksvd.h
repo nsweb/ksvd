@@ -156,6 +156,9 @@ void Solver::Init_WithRandomDictionary( int _dimensionality, int _sample_count, 
 	*/
 void Solver::Init_WithClusteredDictionary( int _dimensionality, int _sample_count, Scalar_t const* _samples, int _target_sparcity, Scalar_t _max_cluster_error, int _max_dictionary_size )
 {
+	if( _sample_count <= 0 || !_samples || _target_sparcity <= 0 )
+		return;
+
 	target_sparcity = _target_sparcity;
 	dictionary_size = _max_dictionary_size;
 	dimensionality = _dimensionality;
@@ -171,7 +174,7 @@ void Solver::Init_WithClusteredDictionary( int _dimensionality, int _sample_coun
 		}
 	}
 
-	// From "clustering before training large datasets - case study: k-svd" paper
+	// Inspired from "clustering before training large datasets - case study: k-svd" paper
 	const Scalar_t T_max_error = _max_cluster_error > (Scalar_t)0.0 ? _max_cluster_error : (Scalar_t)0.95;
 	//const int fast_speed = 2;
 	//const int set_size_max = 128;
@@ -199,7 +202,7 @@ void Solver::Init_WithClusteredDictionary( int _dimensionality, int _sample_coun
 		// Find best matching centroid
 		for( int centroid_idx = 0; centroid_idx < centroid_count; centroid_idx++ )
 		{
-			float dot_val = bigball::abs( centroid_dist[centroid_idx] );
+			float dot_val = fabs( centroid_dist[centroid_idx] );
 			if( dot_val > max_value )
 			{
 				max_value = dot_val;
@@ -226,10 +229,72 @@ void Solver::Init_WithClusteredDictionary( int _dimensionality, int _sample_coun
 		}
 	}
 
-	BB_LOG( CmdTestKSVD, Log, "Found %d centroids for error %.2f", centroid_count, T_max_error );
+	BB_LOG( CmdTestKSVD, Log, "Found %d centroids for error %.2f in first pass", centroid_count, T_max_error );
+
+	// Reduce set of centroids if necessary
+	int centroids_to_remove = centroid_count - _max_dictionary_size ;
+	for( int remove_idx = 0; remove_idx < centroids_to_remove; remove_idx++ )
+	{
+		// Grab the least used centroid
+		int least_used_idx = -1;
+		int min_use_count = INT_MAX;
+		for( int centroid_idx = 0; centroid_idx < centroid_count; centroid_idx++ )
+		{
+			if( centroid_used[centroid_idx] > 0 && centroid_used[centroid_idx] < min_use_count )
+			{
+				min_use_count = centroid_used[centroid_idx];
+				least_used_idx = centroid_idx;
+			}
+		}
+
+		// Project that centroid into its nearest centroid
+		int nearest_idx = -1;
+		float nearest_value = 0.f;
+
+		// Find best matching centroid
+		for( int centroid_idx = 0; centroid_idx < centroid_count; centroid_idx++ )
+		{
+			float dot_val = centroids.col( least_used_idx ).dot( centroids.col( centroid_idx ) );
+			if( fabs( dot_val ) > nearest_value && centroid_idx != least_used_idx )
+			{
+				nearest_value = dot_val;
+				nearest_idx = centroid_idx;
+			}
+		}
+
+		if( nearest_value < 0.f )
+			centroids.col( least_used_idx ) *= -1.f;
+
+		// Merge current centroid with best one
+		float weight = (float)centroid_used[nearest_idx] / (float)(centroid_used[least_used_idx] + centroid_used[nearest_idx]);
+		centroids.col( nearest_idx ) = centroids.col( nearest_idx ) * weight + centroids.col( least_used_idx ) * (1.f - weight);
+		centroids.col( nearest_idx ).normalize();
+		centroid_used[nearest_idx] += centroid_used[least_used_idx];
+		centroid_used[least_used_idx] = 0;
+	}
+
+	// Remove unused centroids
+	if( centroids_to_remove > 0 )
+	{
+		Dict.resize( _dimensionality, _max_dictionary_size );
+		int centroid_push_idx = 0;
+		for( int centroid_idx = 0; centroid_idx < centroid_count; centroid_idx++ )
+		{
+			if( centroid_used[centroid_idx] > 0 )
+			{
+				Dict.col( centroid_push_idx ) = centroids.col( centroid_idx ); 
+				centroid_push_idx++;
+			}
+		}
+
+		centroid_count = _max_dictionary_size;
+	}
+	else
+	{
+		Dict = centroids;
+	}
 
 	dictionary_size = centroid_count;
-	Dict = centroids;
 	X.resize( centroid_count, sample_count );
 }
 
@@ -238,7 +303,7 @@ void Solver::Init_WithClusteredDictionary( int _dimensionality, int _sample_coun
  */
 void Solver::KSVDStep( int kth )
 {
-	// Finw wk as the group of indices pointing to samples {yi} that use the atom dk
+	// Find wk as the group of indices pointing to samples {yi} that use the atom dk
 	IntArray_t wk;
 	int ksample_count = 0;
 	
