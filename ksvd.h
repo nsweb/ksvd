@@ -376,7 +376,7 @@ void Solver::BatchOMPStep()
 	for( int sample_idx = 0; sample_idx < sample_count; sample_idx++ )
 	{
 #ifndef KSVD_NO_IOSTREAM
-		if( verbose_level > 0 && sample_idx % (sample_inc-1) == 0 )
+		if( verbose_level > 0 && (sample_inc < 2 || sample_idx % (sample_inc-1) == 0) )
 			std::cout << "\rOMPStep processing sample " << (sample_idx + 1) * 100 / sample_count << " %" << std::flush;
 #endif
 
