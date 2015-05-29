@@ -194,6 +194,8 @@ void Solver::Init_WithClusteredDictionary( int _dimensionality, int _sample_coun
 		sample.col( 0 ) = Y.col( sample_idx );
 		sample.normalize();
 
+		if( sample_idx % 319 == 0 && sample_idx > 57418 )
+			std::cout << "Sample " << sample_idx << " : " << sample.transpose() << std::endl;
 		ksvd::RowVector_t centroid_dist = sample.transpose() * centroids;
 
 		int max_idx = -1;
@@ -222,6 +224,8 @@ void Solver::Init_WithClusteredDictionary( int _dimensionality, int _sample_coun
 			// Add new centroid
 			centroids.conservativeResize( _dimensionality, centroid_count + 1 );
 			centroids.col( centroid_count ) = sample.col( 0 );
+
+			std::cout << "New centroid " << centroid_count << " : " << centroids.col( centroid_count ).transpose() << std::endl;
 
 			centroid_used.conservativeResize( centroid_count + 1 );
 			centroid_used[centroid_count] = 1;
@@ -255,7 +259,7 @@ void Solver::Init_WithClusteredDictionary( int _dimensionality, int _sample_coun
 		for( int centroid_idx = 0; centroid_idx < centroid_count; centroid_idx++ )
 		{
 			float dot_val = centroids.col( least_used_idx ).dot( centroids.col( centroid_idx ) );
-			if( fabs( dot_val ) > nearest_value && centroid_idx != least_used_idx )
+			if( fabs( dot_val ) > fabs( nearest_value ) && centroid_idx != least_used_idx && centroid_used[centroid_idx] > 0 )
 			{
 				nearest_value = dot_val;
 				nearest_idx = centroid_idx;
