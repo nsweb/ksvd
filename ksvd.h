@@ -150,6 +150,11 @@ void Solver::Init_WithRandomDictionary( int _dimensionality, int _sample_count, 
 	Dict.resize( _dimensionality, _dictionary_size );
 	X.resize( _dictionary_size, _sample_count );
 }
+
+static bool IsNaN( float A ) 
+{
+	return ((*(uint32*)&A) & 0x7FFFFFFF) > 0x7F800000;
+}
 /*
 	* Init solver with an initial dictionary computed by clustering the samples, and finding an optimal dictionary_size 
 	* _samples should be a preallocated buffer of _dimensionality * _sample_count size
@@ -188,14 +193,25 @@ void Solver::Init_WithClusteredDictionary( int _dimensionality, int _sample_coun
 		centroids( dim_index, 0 ) = Y( dim_index, 0 );
 	centroids.col( 0 ).normalize();
 
+#ifndef KSVD_NO_IOSTREAM
+	if( verbose_level > 1 )
+		std::cout << "New centroid " << "0 : " << centroids.col( 0 ).transpose() << std::endl;
+#endif
+
 	for( int sample_idx = 0; sample_idx < _sample_count; sample_idx++ )
 	{
 		ksvd::Vector_t sample( _dimensionality );
 		sample.col( 0 ) = Y.col( sample_idx );
+		if( sample.isZero( (ksvd::Scalar_t)1e-5) )
+			continue;	// ignore empty samples
+		
 		sample.normalize();
+	//bool bNAN = IsNaN( sample[0] );
+	//if( bNAN )
+	//	int Break = 0;
 
-		if( sample_idx % 319 == 0 && sample_idx > 57418 )
-			std::cout << "Sample " << sample_idx << " : " << sample.transpose() << std::endl;
+		//if( sample_idx % 319 == 0 && sample_idx > 57418 )
+		//	std::cout << "Sample " << sample_idx << " : " << sample.transpose() << std::endl;
 		ksvd::RowVector_t centroid_dist = sample.transpose() * centroids;
 
 		int max_idx = -1;
@@ -218,6 +234,10 @@ void Solver::Init_WithClusteredDictionary( int _dimensionality, int _sample_coun
 			int used_count = centroid_used[max_idx];
 			centroids.col( max_idx ) = centroids.col( max_idx ) * ((float)used_count / (float)(used_count + 1)) + sample.col( 0 ) / (float)(used_count + 1);
 			centroid_used[max_idx]++;
+
+		//bNAN = IsNaN( centroids.col( max_idx )[0] );
+		//if( bNAN )
+		//	int Break = 0;
 		}
 		else
 		{
@@ -225,7 +245,10 @@ void Solver::Init_WithClusteredDictionary( int _dimensionality, int _sample_coun
 			centroids.conservativeResize( _dimensionality, centroid_count + 1 );
 			centroids.col( centroid_count ) = sample.col( 0 );
 
-			std::cout << "New centroid " << centroid_count << " : " << centroids.col( centroid_count ).transpose() << std::endl;
+#ifndef KSVD_NO_IOSTREAM
+			if( verbose_level > 1 )
+				std::cout << "New centroid " << centroid_count << " : " << centroids.col( centroid_count ).transpose() << std::endl;
+#endif
 
 			centroid_used.conservativeResize( centroid_count + 1 );
 			centroid_used[centroid_count] = 1;
@@ -233,7 +256,10 @@ void Solver::Init_WithClusteredDictionary( int _dimensionality, int _sample_coun
 		}
 	}
 
-	BB_LOG( CmdTestKSVD, Log, "Found %d centroids for error %.2f in first pass", centroid_count, T_max_error );
+#ifndef KSVD_NO_IOSTREAM
+	if( verbose_level > 0 )
+		std::cout << "Found " << centroid_count << " centroids for error " << T_max_error << " in first pass" << std::endl;
+#endif
 
 	// Reduce set of centroids if necessary
 	int centroids_to_remove = centroid_count - _max_dictionary_size ;
@@ -255,9 +281,13 @@ void Solver::Init_WithClusteredDictionary( int _dimensionality, int _sample_coun
 		int nearest_idx = -1;
 		float nearest_value = 0.f;
 
+		//std::cout << "centroids.col( least_used_idx ) " << centroids.col( least_used_idx ) << std::endl; 
+
 		// Find best matching centroid
 		for( int centroid_idx = 0; centroid_idx < centroid_count; centroid_idx++ )
 		{
+			//std::cout << "centroids.col( centroid_idx ) " << centroids.col( centroid_idx ) << std::endl; 
+
 			float dot_val = centroids.col( least_used_idx ).dot( centroids.col( centroid_idx ) );
 			if( fabs( dot_val ) > fabs( nearest_value ) && centroid_idx != least_used_idx && centroid_used[centroid_idx] > 0 )
 			{
