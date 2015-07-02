@@ -57,17 +57,17 @@ namespace ksvd
 		 * Init solver with a random dictionary, arbitrarily taking samples as the initial atoms 
 		 * _samples should be a preallocated buffer of _dimensionality * _sample_count size
 		 */
-		void Init_WithRandomDictionary( int _dimensionality, int _sample_count, Scalar_t const* _samples, int _target_sparcity, int _dictionary_size );
+		void Init_WithRandomDictionary( int _dimensionality, int _sample_count, Scalar_t const* _samples, int _dictionary_size );
 		/*
 		 * Init solver with an initial dictionary computed by clustering the samples, and finding an optimal dictionary_size 
 		 * _samples should be a preallocated buffer of _dimensionality * _sample_count size
 		 */
-		void Init_WithClusteredDictionary( int _dimensionality, int _sample_count, Scalar_t const* _samples, int _target_sparcity, Scalar_t _max_cluster_error = 0.95, int _max_dictionary_size = 0 );
+		void Init_WithClusteredDictionary( int _dimensionality, int _sample_count, Scalar_t const* _samples, Scalar_t _max_cluster_error = 0.95, int _max_dictionary_size = 0 );
 
 		/** ksvd step : train dictionary from kth sample */
 		void KSVDStep( int kth );
-		void OMPStep();
-		void BatchOMPStep();
+		void OMPStep( int target_sparcity );
+		void BatchOMPStep( int target_sparcity, int* sample_subset = NULL, int subset_count = 0 );
 
 		/** The dictionary - nb of rows = dimensionality - nb of cols = number of atoms / dictionary size */
 		Matrix_t Dict;
@@ -77,7 +77,7 @@ namespace ksvd
 		Matrix_t Y;
 
 		/** The parameters*/
-		int target_sparcity;
+		//int target_sparcity;
 		int dictionary_size;
 		int dimensionality;
 		int sample_count;
@@ -102,7 +102,6 @@ namespace ksvd
 namespace ksvd
 {
 Solver::Solver() :
-	target_sparcity(0),
 	dictionary_size(0),
 	dimensionality(0),
 	sample_count(0),
@@ -119,9 +118,8 @@ Solver::~Solver()
 	* Init solver with a random dictionary, arbitrarily taking samples as the initial atoms 
 	* _samples should be a preallocated buffer of _dimensionality * _sample_count size
 	*/
-void Solver::Init_WithRandomDictionary( int _dimensionality, int _sample_count, Scalar_t const* _samples, int _target_sparcity, int _dictionary_size )
+void Solver::Init_WithRandomDictionary( int _dimensionality, int _sample_count, Scalar_t const* _samples, int _dictionary_size )
 {
-	target_sparcity = _target_sparcity;
 	dictionary_size = _dictionary_size;
 	dimensionality = _dimensionality;
 	sample_count = _sample_count;
@@ -159,12 +157,11 @@ static bool IsNaN( float A )
 	* Init solver with an initial dictionary computed by clustering the samples, and finding an optimal dictionary_size 
 	* _samples should be a preallocated buffer of _dimensionality * _sample_count size
 	*/
-void Solver::Init_WithClusteredDictionary( int _dimensionality, int _sample_count, Scalar_t const* _samples, int _target_sparcity, Scalar_t _max_cluster_error, int _max_dictionary_size )
+void Solver::Init_WithClusteredDictionary( int _dimensionality, int _sample_count, Scalar_t const* _samples, Scalar_t _max_cluster_error, int _max_dictionary_size )
 {
-	if( _sample_count <= 0 || !_samples || _target_sparcity <= 0 )
+	if( _sample_count <= 0 || !_samples )
 		return;
 
-	target_sparcity = _target_sparcity;
 	dictionary_size = _max_dictionary_size;
 	dimensionality = _dimensionality;
 	sample_count = _sample_count;
@@ -398,7 +395,7 @@ void Solver::KSVDStep( int kth )
  * Batch Orthogonal Matching Pursuit step : optimized version of the OMPStep below, as described in the paper
  * "Efficient Implementation of the K-SVD Algorithm and the Batch-OMP Method"
  */
-void Solver::BatchOMPStep()
+void Solver::BatchOMPStep( int target_sparcity, int* sample_subset, int subset_count )
 {
 	const Scalar_t Epsilon = (Scalar_t)1e-4;
 
@@ -406,12 +403,19 @@ void Solver::BatchOMPStep()
 	Matrix_t Dict_T = Dict.transpose();
 	Matrix_t G = Dict_T * Dict;
 
-	const int sample_inc = (sample_count + 99) / 100;
-	for( int sample_idx = 0; sample_idx < sample_count; sample_idx++ )
+	int sample_process_count = subset_count > 0 ? subset_count : sample_count;
+	const int sample_inc = (sample_process_count + 99) / 100;
+	int sample_idx, iter_idx;
+	for( iter_idx = 0; iter_idx < sample_process_count; iter_idx++ )
 	{
+		if( sample_subset )
+			sample_idx = sample_subset[iter_idx];
+		else
+			sample_idx = iter_idx;
+
 #ifndef KSVD_NO_IOSTREAM
 		if( verbose_level > 0 && (sample_inc < 2 || sample_idx % (sample_inc-1) == 0) )
-			std::cout << "\rOMPStep processing sample " << (sample_idx + 1) * 100 / sample_count << " %" << std::flush;
+			std::cout << "\rOMPStep processing sample " << (iter_idx + 1) * 100 / sample_process_count << " %" << std::flush;
 #endif
 
 		Vector_t ysample = Y.col( sample_idx );
@@ -508,7 +512,7 @@ void Solver::BatchOMPStep()
 /*
  * Orhtogonal Matching Pursuit step : find the best projection of each sample on a given set of atoms in dictionary
  */
-void Solver::OMPStep()
+void Solver::OMPStep( int target_sparcity )
 {
 	const Scalar_t Epsilon = (Scalar_t)1e-4;
 
