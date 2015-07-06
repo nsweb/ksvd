@@ -429,6 +429,10 @@ void Solver::BatchOMPStep( int target_sparcity, int* sample_subset, int subset_c
 		Vector_t alpha0_I;
 		Matrix_t GI_T( dictionary_size, 0 );		// Incrementaly updated
 		Matrix_t cn;
+		Scalar_t delta_n = 0;
+		Scalar_t error_n = 0;
+		Vector_t beta;
+		Vector_t beta_I;
 		//Matrix_t LTc;
 
 		//Matrix_t dk( dimensionality, 1 );
@@ -483,7 +487,6 @@ void Solver::BatchOMPStep( int target_sparcity, int* sample_subset, int subset_c
 
 			GI_T.conservativeResize( dictionary_size, I_atom_count + 1 );
 			GI_T.col( I_atom_count ) = G.row( max_idx );
-			I_atom_count++;
 
 			// cn = solve for c { L.LT.c = alpha0_I }
 			// first solve LTc :
@@ -492,7 +495,20 @@ void Solver::BatchOMPStep( int target_sparcity, int* sample_subset, int subset_c
 			cn = L.transpose().triangularView<Eigen::Upper>().solve( LTc );
 			
 			if( k < target_sparcity-1 )
-				alphan = alpha0 - (GI_T * cn);
+			{
+				beta = GI_T * cn;
+				alphan = alpha0 - beta;
+
+				// Error based
+				beta_I.conservativeResize( I_atom_count + 1 );
+				beta_I[I_atom_count] = beta[max_idx];
+
+				error_n += delta_n;
+				delta_n = (cn.transpose() * beta_I)(0, 0);
+				error_n -= delta_n;
+			}
+
+			I_atom_count++;
 		}
 
 		// Update this particular sample in X matrix
