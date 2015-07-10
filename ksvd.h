@@ -63,11 +63,23 @@ namespace ksvd
 		 * _samples should be a preallocated buffer of _dimensionality * _sample_count size
 		 */
 		void Init_WithClusteredDictionary( int _dimensionality, int _sample_count, Scalar_t const* _samples, Scalar_t _max_cluster_error = 0.95, int _max_dictionary_size = 0 );
+		/*
+		 * Augment the initial dictionary with additional centroids computed by clustering the input samples, with up to _max_dictionary_size atoms in total
+		 * _samples should be a preallocated buffer of dimensionality * _sample_count size
+		 */
+		void AugmentDictionary( int _sample_count, Scalar_t const* _samples, Scalar_t _max_cluster_error = 0.95, int _max_dictionary_size = 0, bool fill_dict_holes = false );
+
+		/*
+		 * Compute a set of centroids approximating the input samples
+		 * _samples should be a preallocated buffer of _dimensionality * _sample_count size
+		 * -> returns the number of centroids found
+		 */
+		int ComputeCentroids( int _dimensionality, int _sample_count, Scalar_t const* _samples, const Scalar_t T_max_error, int _max_centroid_count, Matrix_t& _out_centroids ) const;
 
 		/** ksvd step : train dictionary from kth sample */
 		void KSVDStep( int kth );
 		void OMPStep( int target_sparcity );
-		void BatchOMPStep( int target_sparcity, int* sample_subset = NULL, int subset_count = 0 );
+		void BatchOMPStep( int max_sparcity, Scalar_t max_error = 0, int* sample_subset = NULL, int subset_count = 0 );
 
 		/** The dictionary - nb of rows = dimensionality - nb of cols = number of atoms / dictionary size */
 		Matrix_t Dict;
@@ -84,8 +96,8 @@ namespace ksvd
 		int verbose_level;
 	};
 
+	static bool IsNaN( float A ) 	{ return ((*(uint32*)&A) & 0x7FFFFFFF) > 0x7F800000; }
 	void TestSolver();
-	void SolveImg( Scalar_t* img_data, int with, int height, Scalar_t* out_data/*, Scalar_t* out_atoms, int* width_atoms, int* height_atoms*/ );
 
 }; /*namespace ksvd*/
 
@@ -115,9 +127,9 @@ Solver::~Solver()
 }
 
 /*
-	* Init solver with a random dictionary, arbitrarily taking samples as the initial atoms 
-	* _samples should be a preallocated buffer of _dimensionality * _sample_count size
-	*/
+ * Init solver with a random dictionary, arbitrarily taking samples as the initial atoms 
+ * _samples should be a preallocated buffer of _dimensionality * _sample_count size
+ */
 void Solver::Init_WithRandomDictionary( int _dimensionality, int _sample_count, Scalar_t const* _samples, int _dictionary_size )
 {
 	dictionary_size = _dictionary_size;
@@ -149,14 +161,10 @@ void Solver::Init_WithRandomDictionary( int _dimensionality, int _sample_count, 
 	X.resize( _dictionary_size, _sample_count );
 }
 
-static bool IsNaN( float A ) 
-{
-	return ((*(uint32*)&A) & 0x7FFFFFFF) > 0x7F800000;
-}
 /*
-	* Init solver with an initial dictionary computed by clustering the samples, and finding an optimal dictionary_size 
-	* _samples should be a preallocated buffer of _dimensionality * _sample_count size
-	*/
+ * Init solver with an initial dictionary computed by clustering the samples, and finding an optimal dictionary_size 
+ * _samples should be a preallocated buffer of _dimensionality * _sample_count size
+ */
 void Solver::Init_WithClusteredDictionary( int _dimensionality, int _sample_count, Scalar_t const* _samples, Scalar_t _max_cluster_error, int _max_dictionary_size )
 {
 	if( _sample_count <= 0 || !_samples )
@@ -178,38 +186,71 @@ void Solver::Init_WithClusteredDictionary( int _dimensionality, int _sample_coun
 
 	// Inspired from "clustering before training large datasets - case study: k-svd" paper
 	const Scalar_t T_max_error = _max_cluster_error > (Scalar_t)0.0 ? _max_cluster_error : (Scalar_t)0.95;
-	//const int fast_speed = 2;
-	//const int set_size_max = 128;
-	//int set_size = 16;
+	int centroid_count = ComputeCentroids( _dimensionality, _sample_count, _samples, T_max_error, _max_dictionary_size, Dict );
+	dictionary_size = centroid_count;
+
+	X.resize( centroid_count, sample_count );
+}
+
+/*
+ * Augment the initial dictionary with additional centroids computed by clustering the input samples, with up to _max_dictionary_size atoms in total
+ * _samples should be a preallocated buffer of dimensionality * _sample_count size
+ */
+void Solver::AugmentDictionary( int _sample_count, Scalar_t const* _samples, Scalar_t _max_cluster_error, int _max_dictionary_size, bool fill_dict_holes )
+{
+	const Scalar_t T_max_error = _max_cluster_error > (Scalar_t)0.0 ? _max_cluster_error : (Scalar_t)0.95;
+	int target_additional_centroid_count = _max_dictionary_size > 0 ? _max_dictionary_size - dictionary_size : 0;
+	Matrix_t additional_centroids;
+	int centroid_count = ComputeCentroids( dimensionality, _sample_count, _samples, T_max_error, target_additional_centroid_count, additional_centroids );
+
+	Dict.conservativeResize( dimensionality, dictionary_size + centroid_count );
+	for( int centroid_idx = 0; centroid_idx < centroid_count; centroid_idx++ )
+	{
+		Dict.col( dictionary_size + centroid_idx ) = additional_centroids.col( centroid_idx );
+	}
+
+	dictionary_size += centroid_count;
+}
+
+/*
+ * Compute a set of centroids approximating the input samples
+ * _samples should be a preallocated buffer of _dimensionality * _sample_count size
+ * -> returns the number of centroids found
+ */
+int Solver::ComputeCentroids( int _dimensionality, int _sample_count, Scalar_t const* _samples, const Scalar_t T_max_error, int _max_centroid_count, Matrix_t& _out_centroids ) const 
+{
 	int centroid_count = 1;
 	IntArray_t centroid_used;
 	centroid_used.conservativeResize( 1 );
 	centroid_used[0] = 0;
-	ksvd::Matrix_t centroids( _dimensionality, 1 );
+
+	_out_centroids.resize( _dimensionality, 1 );
 	for( int dim_index = 0; dim_index < _dimensionality; dim_index++ )
-		centroids( dim_index, 0 ) = Y( dim_index, 0 );
-	centroids.col( 0 ).normalize();
+		_out_centroids( dim_index, 0 ) = _samples[dim_index];//Y( dim_index, 0 );
+	_out_centroids.col( 0 ).normalize();
 
 #ifndef KSVD_NO_IOSTREAM
 	if( verbose_level > 1 )
-		std::cout << "New centroid " << "0 : " << centroids.col( 0 ).transpose() << std::endl;
+		std::cout << "New centroid " << "0 : " << _out_centroids.col( 0 ).transpose() << std::endl;
 #endif
 
 	for( int sample_idx = 0; sample_idx < _sample_count; sample_idx++ )
 	{
 		ksvd::Vector_t sample( _dimensionality );
-		sample.col( 0 ) = Y.col( sample_idx );
+		Eigen::Map<ksvd::Vector_t> mf( (Scalar_t*)(_samples + sample_idx * _dimensionality), _dimensionality, 1 );
+		sample.col( 0 ) = mf;
+		//sample.col( 0 ) = Y.col( sample_idx );
 		if( sample.isZero( (ksvd::Scalar_t)1e-5) )
 			continue;	// ignore empty samples
-		
+
 		sample.normalize();
-	//bool bNAN = IsNaN( sample[0] );
-	//if( bNAN )
-	//	int Break = 0;
+		//bool bNAN = IsNaN( sample[0] );
+		//if( bNAN )
+		//	int Break = 0;
 
 		//if( sample_idx % 319 == 0 && sample_idx > 57418 )
 		//	std::cout << "Sample " << sample_idx << " : " << sample.transpose() << std::endl;
-		ksvd::RowVector_t centroid_dist = sample.transpose() * centroids;
+		ksvd::RowVector_t centroid_dist = sample.transpose() * _out_centroids;
 
 		int max_idx = -1;
 		float max_value = -1.f;
@@ -229,22 +270,22 @@ void Solver::Init_WithClusteredDictionary( int _dimensionality, int _sample_coun
 		{
 			// Found a good centroid candidate, average centroid pos
 			int used_count = centroid_used[max_idx];
-			centroids.col( max_idx ) = centroids.col( max_idx ) * ((float)used_count / (float)(used_count + 1)) + sample.col( 0 ) / (float)(used_count + 1);
+			_out_centroids.col( max_idx ) = _out_centroids.col( max_idx ) * ((float)used_count / (float)(used_count + 1)) + sample.col( 0 ) / (float)(used_count + 1);
 			centroid_used[max_idx]++;
 
-		//bNAN = IsNaN( centroids.col( max_idx )[0] );
-		//if( bNAN )
-		//	int Break = 0;
+			//bNAN = IsNaN( centroids.col( max_idx )[0] );
+			//if( bNAN )
+			//	int Break = 0;
 		}
 		else
 		{
 			// Add new centroid
-			centroids.conservativeResize( _dimensionality, centroid_count + 1 );
-			centroids.col( centroid_count ) = sample.col( 0 );
+			_out_centroids.conservativeResize( _dimensionality, centroid_count + 1 );
+			_out_centroids.col( centroid_count ) = sample.col( 0 );
 
 #ifndef KSVD_NO_IOSTREAM
 			if( verbose_level > 1 )
-				std::cout << "New centroid " << centroid_count << " : " << centroids.col( centroid_count ).transpose() << std::endl;
+				std::cout << "New centroid " << centroid_count << " : " << _out_centroids.col( centroid_count ).transpose() << std::endl;
 #endif
 
 			centroid_used.conservativeResize( centroid_count + 1 );
@@ -259,7 +300,7 @@ void Solver::Init_WithClusteredDictionary( int _dimensionality, int _sample_coun
 #endif
 
 	// Reduce set of centroids if necessary
-	int centroids_to_remove = centroid_count - _max_dictionary_size ;
+	int centroids_to_remove = centroid_count - _max_centroid_count ;
 	for( int remove_idx = 0; remove_idx < centroids_to_remove; remove_idx++ )
 	{
 		// Grab the least used centroid
@@ -285,7 +326,7 @@ void Solver::Init_WithClusteredDictionary( int _dimensionality, int _sample_coun
 		{
 			//std::cout << "centroids.col( centroid_idx ) " << centroids.col( centroid_idx ) << std::endl; 
 
-			float dot_val = centroids.col( least_used_idx ).dot( centroids.col( centroid_idx ) );
+			float dot_val = _out_centroids.col( least_used_idx ).dot( _out_centroids.col( centroid_idx ) );
 			if( fabs( dot_val ) > fabs( nearest_value ) && centroid_idx != least_used_idx && centroid_used[centroid_idx] > 0 )
 			{
 				nearest_value = dot_val;
@@ -294,12 +335,12 @@ void Solver::Init_WithClusteredDictionary( int _dimensionality, int _sample_coun
 		}
 
 		if( nearest_value < 0.f )
-			centroids.col( least_used_idx ) *= -1.f;
+			_out_centroids.col( least_used_idx ) *= -1.f;
 
 		// Merge current centroid with best one
 		float weight = (float)centroid_used[nearest_idx] / (float)(centroid_used[least_used_idx] + centroid_used[nearest_idx]);
-		centroids.col( nearest_idx ) = centroids.col( nearest_idx ) * weight + centroids.col( least_used_idx ) * (1.f - weight);
-		centroids.col( nearest_idx ).normalize();
+		_out_centroids.col( nearest_idx ) = _out_centroids.col( nearest_idx ) * weight + _out_centroids.col( least_used_idx ) * (1.f - weight);
+		_out_centroids.col( nearest_idx ).normalize();
 		centroid_used[nearest_idx] += centroid_used[least_used_idx];
 		centroid_used[least_used_idx] = 0;
 	}
@@ -307,26 +348,22 @@ void Solver::Init_WithClusteredDictionary( int _dimensionality, int _sample_coun
 	// Remove unused centroids
 	if( centroids_to_remove > 0 )
 	{
-		Dict.resize( _dimensionality, _max_dictionary_size );
+		ksvd::Matrix_t temp_matrix( _dimensionality, _max_centroid_count );
 		int centroid_push_idx = 0;
 		for( int centroid_idx = 0; centroid_idx < centroid_count; centroid_idx++ )
 		{
 			if( centroid_used[centroid_idx] > 0 )
 			{
-				Dict.col( centroid_push_idx ) = centroids.col( centroid_idx ); 
+				temp_matrix.col( centroid_push_idx ) = _out_centroids.col( centroid_idx ); 
 				centroid_push_idx++;
 			}
 		}
 
-		centroid_count = _max_dictionary_size;
-	}
-	else
-	{
-		Dict = centroids;
+		_out_centroids = temp_matrix;
+		centroid_count = _max_centroid_count;
 	}
 
-	dictionary_size = centroid_count;
-	X.resize( centroid_count, sample_count );
+	return centroid_count;
 }
 
 /*
@@ -395,7 +432,7 @@ void Solver::KSVDStep( int kth )
  * Batch Orthogonal Matching Pursuit step : optimized version of the OMPStep below, as described in the paper
  * "Efficient Implementation of the K-SVD Algorithm and the Batch-OMP Method"
  */
-void Solver::BatchOMPStep( int target_sparcity, int* sample_subset, int subset_count )
+void Solver::BatchOMPStep( int max_sparcity, Scalar_t max_error, int* sample_subset, int subset_count )
 {
 	const Scalar_t Epsilon = (Scalar_t)1e-4;
 
@@ -430,16 +467,11 @@ void Solver::BatchOMPStep( int target_sparcity, int* sample_subset, int subset_c
 		Matrix_t GI_T( dictionary_size, 0 );		// Incrementaly updated
 		Matrix_t cn;
 		Scalar_t delta_n = 0;
-		Scalar_t error_n = 0;
+		Scalar_t error_n = ysample.dot( ysample );
 		Vector_t beta;
 		Vector_t beta_I;
-		//Matrix_t LTc;
 
-		//Matrix_t dk( dimensionality, 1 );
-		//Matrix_t DictI_T( 0, dimensionality );			// Incrementaly updated
-		//Matrix_t xI;									// (out) -> encoded signal
-
-		for( int k = 0; k < target_sparcity ; k++ )
+		for( int k = 0; k < max_sparcity && error_n >= max_error; k++ )
 		{
 			// Select greatest component of alpha_n
 			int max_idx = -1;
@@ -453,8 +485,8 @@ void Solver::BatchOMPStep( int target_sparcity, int* sample_subset, int subset_c
 					max_idx = atom_idx;
 				}
 			}
-			if( max_value < Epsilon )
-				break;
+			//if( max_value < Epsilon )
+			//	break;
 
 			if( I_atom_count >= 1 )
 			{
@@ -494,18 +526,21 @@ void Solver::BatchOMPStep( int target_sparcity, int* sample_subset, int subset_c
 			// then solve c :
 			cn = L.transpose().triangularView<Eigen::Upper>().solve( LTc );
 			
-			if( k < target_sparcity-1 )
+			//if( k < max_sparcity-1 )
 			{
 				beta = GI_T * cn;
 				alphan = alpha0 - beta;
 
 				// Error based
-				beta_I.conservativeResize( I_atom_count + 1 );
-				beta_I[I_atom_count] = beta[max_idx];
+				if( max_error > 0 )
+				{
+					beta_I.conservativeResize( I_atom_count + 1 );
+					beta_I[I_atom_count] = beta[max_idx];
 
-				error_n += delta_n;
-				delta_n = (cn.transpose() * beta_I)(0, 0);
-				error_n -= delta_n;
+					error_n += delta_n;
+					delta_n = (cn.transpose() * beta_I)(0, 0);
+					error_n -= delta_n;
+				}
 			}
 
 			I_atom_count++;
