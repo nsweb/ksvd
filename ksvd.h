@@ -67,7 +67,7 @@ namespace ksvd
 		 * Augment the initial dictionary with additional centroids computed by clustering the input samples, with up to _max_dictionary_size atoms in total
 		 * _samples should be a preallocated buffer of dimensionality * _sample_count size
 		 */
-		void AugmentDictionary( int _sample_count, Scalar_t const* _samples, Scalar_t _max_cluster_error = 0.95, int _max_dictionary_size = 0, bool fill_dict_holes = false );
+		void AugmentDictionary( int _sample_count, Scalar_t const* _samples, Scalar_t _max_cluster_error = 0.95, int _max_dictionary_size = 0, int const* _replace_atom_indices = NULL, int _replace_count = 0 );
 
 		/*
 		 * Compute a set of centroids approximating the input samples
@@ -196,20 +196,29 @@ void Solver::Init_WithClusteredDictionary( int _dimensionality, int _sample_coun
  * Augment the initial dictionary with additional centroids computed by clustering the input samples, with up to _max_dictionary_size atoms in total
  * _samples should be a preallocated buffer of dimensionality * _sample_count size
  */
-void Solver::AugmentDictionary( int _sample_count, Scalar_t const* _samples, Scalar_t _max_cluster_error, int _max_dictionary_size, bool fill_dict_holes )
+void Solver::AugmentDictionary( int _sample_count, Scalar_t const* _samples, Scalar_t _max_cluster_error, int _max_dictionary_size, int const* _replace_atom_indices, int _replace_count )
 {
+    if( _replace_atom_indices == NULL )
+        _replace_count = 0;
+    
 	const Scalar_t T_max_error = _max_cluster_error > (Scalar_t)0.0 ? _max_cluster_error : (Scalar_t)0.95;
-	int target_additional_centroid_count = _max_dictionary_size > 0 ? _max_dictionary_size - dictionary_size : 0;
+	int target_additional_centroid_count = _max_dictionary_size > 0 ? _max_dictionary_size - dictionary_size + _replace_count : 0;
 	Matrix_t additional_centroids;
 	int centroid_count = ComputeCentroids( dimensionality, _sample_count, _samples, T_max_error, target_additional_centroid_count, additional_centroids );
 
-	Dict.conservativeResize( dimensionality, dictionary_size + centroid_count );
-	for( int centroid_idx = 0; centroid_idx < centroid_count; centroid_idx++ )
+	Dict.conservativeResize( dimensionality, dictionary_size + centroid_count - _replace_count );
+    
+    int centroid_idx;
+    for( centroid_idx = 0; centroid_idx < _replace_count; centroid_idx++ )
+    {
+        Dict.col( _replace_atom_indices[centroid_idx] ) = additional_centroids.col( centroid_idx );
+    }
+	for( ; centroid_idx < centroid_count; centroid_idx++ )
 	{
-		Dict.col( dictionary_size + centroid_idx ) = additional_centroids.col( centroid_idx );
+		Dict.col( dictionary_size + centroid_idx - _replace_count ) = additional_centroids.col( centroid_idx - _replace_count );
 	}
 
-	dictionary_size += centroid_count;
+	dictionary_size += centroid_count - _replace_count ;
 
 	X.conservativeResize( dictionary_size, sample_count );
 }
