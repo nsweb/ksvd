@@ -210,6 +210,8 @@ void Solver::AugmentDictionary( int _sample_count, Scalar_t const* _samples, Sca
 	}
 
 	dictionary_size += centroid_count;
+
+	X.conservativeResize( dictionary_size, sample_count );
 }
 
 /*
