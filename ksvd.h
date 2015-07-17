@@ -215,7 +215,7 @@ void Solver::AugmentDictionary( int _sample_count, Scalar_t const* _samples, Sca
     }
 	for( ; centroid_idx < centroid_count; centroid_idx++ )
 	{
-		Dict.col( dictionary_size + centroid_idx - _replace_count ) = additional_centroids.col( centroid_idx - _replace_count );
+		Dict.col( dictionary_size + centroid_idx - _replace_count ) = additional_centroids.col( centroid_idx );
 	}
 
 	dictionary_size += centroid_count - _replace_count ;
