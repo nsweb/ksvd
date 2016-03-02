@@ -44,6 +44,28 @@ namespace ksvd
 	typedef Eigen::Matrix<Scalar_t, Eigen::Dynamic, 1>									Vector_t;
 	typedef Eigen::ArrayXi																IntArray_t;
 
+	struct BatchOMPData
+	{
+		/** Static data in one BatchOMP step */
+
+		/** Dictionary transpose */ 
+		Matrix_t Dict_T;
+		/** Graham matrix G = Dict_T.Dict */
+		Matrix_t G;
+
+		void Init( Matrix_t const& Dict )
+		{
+			// Compute Graham matrix G = Dict_T.Dict
+			Dict_T = Dict.transpose();
+			G = Dict_T * Dict;
+		}
+	};
+
+	struct BatchOMPThreadData
+	{
+
+	};
+
 	class Solver
 	{
 	public:
@@ -80,6 +102,9 @@ namespace ksvd
 		void KSVDStep( int kth );
 		void OMPStep( int target_sparcity );
 		void BatchOMPStep( int max_sparcity, Scalar_t max_error = 0, int* sample_subset = NULL, int subset_count = 0 );
+
+		void BatchOMPStepSamples( BatchOMPData const& omp_data, int max_sparcity, Scalar_t max_error, int* sample_subset, int subset_count, bool can_log );
+		void BatchOMPStepSample( BatchOMPData const& omp_data, int max_sparcity, Scalar_t max_error, int sample_idx );
 
 		/** The dictionary - nb of rows = dimensionality - nb of cols = number of atoms / dictionary size */
 		Matrix_t Dict;
@@ -379,6 +404,8 @@ int Solver::ComputeCentroids( int _dimensionality, int _sample_count, Scalar_t c
 
 /*
  * ksvd step : train dictionary from kth sample 
+ * can be easily multithreaded by updating multiple atoms at the same time.
+ * Note that you should call Eigen::initParallel() before, as detailed here http://eigen.tuxfamily.org/dox/TopicMultiThreading.html
  */
 void Solver::KSVDStep( int kth )
 {
@@ -413,7 +440,7 @@ void Solver::KSVDStep( int kth )
 	}
 
 	// Extract xrk
-	Vector_t xrk( Xr.row(kth) );
+	//Vector_t xrk( Xr.row(kth) );
 
 	// Replace xrk in Xr by zeros so as to compute Erk
 	Xr.row(kth).head(ksample_count).setZero();
@@ -436,6 +463,132 @@ void Solver::KSVDStep( int kth )
 	for( int sample_idx = 0; sample_idx < ksample_count; sample_idx++ )
 	{
 		X( kth, wk[sample_idx] ) = xrk_new[sample_idx];
+	}
+}
+
+
+
+/* BatchOMPStepSamples : computes encoded a subset of samples against a fixed dictionary
+ * Can easily be multithreaded
+ * Note that you should call Eigen::initParallel() before, as detailed here http://eigen.tuxfamily.org/dox/TopicMultiThreading.html
+ */
+void Solver::BatchOMPStepSamples( BatchOMPData const& omp_data, int max_sparcity, Scalar_t max_error, int* sample_subset, int subset_count, bool can_log )
+{
+	const int sample_inc = (subset_count + 99) / 100;
+	for( int iter_idx = 0; iter_idx < subset_count; iter_idx++ )
+	{
+		int sample_idx = sample_subset[iter_idx];
+
+#ifndef KSVD_NO_IOSTREAM
+		if( can_log && verbose_level > 0 && (sample_inc < 2 || sample_idx % (sample_inc-1) == 0) )
+			std::cout << "\rOMPStep processing sample " << (iter_idx + 1) * 100 / subset_count << " %" << std::flush;
+#endif
+
+		BatchOMPStepSample( omp_data, max_sparcity, max_error, sample_idx );
+	}
+
+#ifndef KSVD_NO_IOSTREAM
+	if( can_log && verbose_level > 0 )
+		std::cout << "\rOMPStep processing sample 100 %" << std::endl;
+#endif
+}
+
+void Solver::BatchOMPStepSample( BatchOMPData const& omp_data, int max_sparcity, Scalar_t max_error, int sample_idx )
+{
+	Vector_t ysample = Y.col( sample_idx );
+	Vector_t r( ysample );						// residual
+	IntArray_t I_atoms;							// (out) list of selected atoms for given sample
+	Matrix_t L( 1, 1 );							// Matrix from Cholesky decomposition, incrementally augmented
+	L(0, 0) = (Scalar_t)1.;
+	int I_atom_count = 0;
+	Vector_t alpha0 = omp_data.Dict_T * ysample;			// project sample on all atoms
+	Vector_t alphan( alpha0 );
+	Vector_t alpha0_I;
+	Matrix_t GI_T( dictionary_size, 0 );		// Incrementaly updated
+	Matrix_t cn;
+	Scalar_t delta_n = 0;
+	Scalar_t error_n = ysample.dot( ysample );
+	Vector_t beta;
+	Vector_t beta_I;
+
+	for( int k = 0; k < max_sparcity && error_n >= max_error; k++ )
+	{
+		// Select greatest component of alpha_n
+		int max_idx = -1;
+		Scalar_t max_value = (Scalar_t)-1.;
+		for( int atom_idx = 0; atom_idx < dictionary_size; atom_idx++ )
+		{
+			Scalar_t dot_val = fabs( (Scalar_t)alphan[atom_idx] );
+			if( dot_val > max_value )
+			{
+				max_value = dot_val;
+				max_idx = atom_idx;
+			}
+		}
+
+		if( I_atom_count >= 1 )
+		{
+			// Build column vector GI_k (in place in wM)
+			Matrix_t wM( I_atom_count, 1 );		
+			for( int atom_idx = 0; atom_idx < I_atom_count; atom_idx++ )
+			{
+				wM(atom_idx, 0) = omp_data.G( I_atoms[atom_idx], max_idx );
+			}
+
+			// w = solve for w { L.w = GI_k }
+			L.triangularView<Eigen::Lower>().solveInPlace( wM );
+
+			//            | L       0		|
+			// Update L = | wT  sqrt(1-wTw)	|
+			//                               
+			L.conservativeResize( I_atom_count + 1, I_atom_count + 1 );
+			L.row(I_atom_count).head(I_atom_count) = wM.col(0).head(I_atom_count);
+			L.col(I_atom_count).setZero(); 
+
+			Scalar_t val_tmp = 1 - wM.col(0).dot( wM.col(0) );
+			L( I_atom_count, I_atom_count ) = val_tmp < 1 ? (val_tmp < 0 ? 0 : (Scalar_t) ::sqrt( (Scalar_t)val_tmp )) : 1;
+		}
+
+		I_atoms.conservativeResize( I_atom_count + 1 );
+		I_atoms[I_atom_count] = max_idx;
+
+		alpha0_I.conservativeResize( I_atom_count + 1 );
+		alpha0_I[I_atom_count] = alpha0[max_idx];
+
+		GI_T.conservativeResize( dictionary_size, I_atom_count + 1 );
+		GI_T.col( I_atom_count ) = omp_data.G.row( max_idx );
+
+		// cn = solve for c { L.LT.c = alpha0_I }
+		// first solve LTc :
+		Matrix_t LTc = L.triangularView<Eigen::Lower>().solve( alpha0_I );
+		// then solve c :
+		cn = L.transpose().triangularView<Eigen::Upper>().solve( LTc );
+
+		//if( k < max_sparcity-1 )
+		{
+			beta = GI_T * cn;
+			alphan = alpha0 - beta;
+
+			// Error based
+			if( max_error > 0 )
+			{
+				beta_I.conservativeResize( I_atom_count + 1 );
+				beta_I[I_atom_count] = beta[max_idx];
+
+				error_n += delta_n;
+				delta_n = (cn.transpose() * beta_I)(0, 0);
+				error_n -= delta_n;
+			}
+		}
+
+		I_atom_count++;
+	}
+
+	// Update this particular sample in X matrix
+	X.col( sample_idx ).setZero();
+	for( int atom_idx = 0; atom_idx < I_atom_count; atom_idx++ )
+	{
+		X( I_atoms[atom_idx], sample_idx ) = cn( atom_idx, 0 );
 	}
 }
 
@@ -489,7 +642,7 @@ void Solver::BatchOMPStep( int max_sparcity, Scalar_t max_error, int* sample_sub
 			Scalar_t max_value = (Scalar_t)-1.;
 			for( int atom_idx = 0; atom_idx < dictionary_size; atom_idx++ )
 			{
-				Scalar_t dot_val = ::abs( (Scalar_t)alphan[atom_idx] );
+				Scalar_t dot_val = fabs( (Scalar_t)alphan[atom_idx] );
 				if( dot_val > max_value )
 				{
 					max_value = dot_val;
@@ -605,7 +758,7 @@ void Solver::OMPStep( int target_sparcity )
 			for( int atom_idx = 0; atom_idx < dictionary_size; atom_idx++ )
 			{
 				//std::cout << "Here is the atom " << atom_idx << " :" << Dict.col( atom_idx ) << std::endl;
-				Scalar_t dot_val = ::abs( (Scalar_t)Dict.col( atom_idx ).dot( r ) );
+				Scalar_t dot_val = fabs( (Scalar_t)Dict.col( atom_idx ).dot( r ) );
 				if( dot_val > max_value )
 				{
 					max_value = dot_val;
